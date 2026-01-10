@@ -1,0 +1,13 @@
+{
+  "name": "@ai-learning/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared types and schemas between pedagogy-engine and web",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./pedagogical-intent": "./schemas/pedagogical-intent.ts",
+    "./lesson": "./schemas/lesson.ts"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "ai-learning",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI-powered learning platform with separated pedagogical reasoning and visualization",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:web\" \"npm run dev:api\"",
+    "dev:web": "npm run dev --workspace=web",
+    "dev:api": "cd packages/api && uvicorn main:app --reload",
+    "dev:pedagogy": "cd packages/pedagogy-engine && PYTHONPATH=$(pwd)/packages/pedagogy-engine python packages/pedagogy-engine/layer1/generator.py",
+    "build": "npm run build --workspaces",
+    "build:web": "npm run build --workspace=web",
+    "test": "npm run test --workspaces",
+    "lint": "npm run lint --workspaces",
+    "clean": "rm -rf node_modules packages/*/node_modules packages/*/.next packages/*/dist"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}

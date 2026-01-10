@@ -1,0 +1,4 @@
+gensim
+manim
+tiktoken
+manimgl
