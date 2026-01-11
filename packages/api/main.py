@@ -13,7 +13,7 @@ from pathlib import Path
 pedagogy_engine_path = Path(__file__).parent.parent / "pedagogy-engine"
 sys.path.insert(0, str(pedagogy_engine_path))
 
-from routes import generate, lessons
+from routes import generate, lessons, storyboards
 
 app = FastAPI(
     title="AI Learning Platform API",
@@ -33,6 +33,7 @@ app.add_middleware(
 # Include routers
 app.include_router(generate.router, prefix="/api/generate", tags=["generation"])
 app.include_router(lessons.router, prefix="/api/lessons", tags=["lessons"])
+app.include_router(storyboards.router, prefix="/api/storyboard", tags=["storyboards"])
 
 
 @app.get("/")
@@ -43,6 +44,7 @@ async def root():
         "endpoints": {
             "generate": "/api/generate",
             "lessons": "/api/lessons",
+            "storyboard": "/api/storyboard",
             "docs": "/docs"
         }
     }
