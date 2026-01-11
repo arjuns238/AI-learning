@@ -54,7 +54,7 @@ export function LessonRenderer({ lesson }: { lesson: Lesson }) {
           <CardTitle>Visual</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {lesson.visual.spec?.title ? (
+          {"title" in lesson.visual.spec && lesson.visual.spec.title ? (
             <p className="text-sm font-medium text-slate-600">
               {lesson.visual.spec.title}
             </p>

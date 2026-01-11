@@ -8,11 +8,11 @@
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev:web\" \"npm run dev:api\"",
-    "dev:web": "npm run dev --workspace=web",
+    "dev:web": "npm run dev --workspace=ai-learning-app",
     "dev:api": "cd packages/api && uvicorn main:app --reload",
-    "dev:pedagogy": "cd packages/pedagogy-engine && PYTHONPATH=$(pwd)/packages/pedagogy-engine python packages/pedagogy-engine/layer1/generator.py",
+    "dev:pedagogy": "cd packages/pedagogy-engine && PYTHONPATH=$(pwd) python -m layer1.generator",
     "build": "npm run build --workspaces",
-    "build:web": "npm run build --workspace=web",
+    "build:web": "npm run build --workspace=ai-learning-app",
     "test": "npm run test --workspaces",
     "lint": "npm run lint --workspaces",
     "clean": "rm -rf node_modules packages/*/node_modules packages/*/.next packages/*/dist"

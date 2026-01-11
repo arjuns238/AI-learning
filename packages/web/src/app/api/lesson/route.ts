@@ -155,8 +155,10 @@ Generate the lesson JSON now.`;
   const isAttentionTopic = /attention/i.test(payload.topic);
   const isAttentionSpecValid =
     lesson.visual?.type === "attention_heatmap" &&
-    Array.isArray((lesson.visual as Lesson["visual"]).spec?.tokens) &&
-    Array.isArray((lesson.visual as Lesson["visual"]).spec?.weights);
+    "tokens" in lesson.visual.spec &&
+    "weights" in lesson.visual.spec &&
+    Array.isArray(lesson.visual.spec.tokens) &&
+    Array.isArray(lesson.visual.spec.weights);
 
   let isDefaultVisual = false;
 

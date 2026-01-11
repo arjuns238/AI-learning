@@ -1,0 +1,86 @@
+{
+  "exemplars": [
+    {
+      "id": "ml_gradient_descent_01",
+      "topic": "Gradient Descent",
+      "domain": "machine_learning",
+      "difficulty_level": 3,
+      "pedagogical_pattern": "iterative_process_visualization",
+      "core_question": "How does an algorithm find the best parameters when there are millions of possibilities to try?",
+      "target_mental_model": "Gradient descent is like navigating down a mountainside in fog: you can't see the whole landscape, but you can feel which direction slopes downward beneath your feet. By repeatedly taking small steps in the steepest downward direction, you eventually reach a valley (local minimum), even without a map of the entire terrain.",
+      "common_misconception": "Gradient descent always finds the single best solution (global minimum) for any problem, like a GPS finding the optimal route.",
+      "disambiguating_contrast": "Gradient descent vs exhaustive search: Exhaustive search tries every possible solution (like checking every point on a map), which is thorough but impossibly slow for high-dimensional spaces. Gradient descent uses local information (the slope) to navigate efficiently, trading guaranteed optimality for practical speed.",
+      "concrete_anchor": "Training a model to predict house prices with two features (size and bedrooms). Start with random weights. The error surface is a bowl-shaped landscape. Gradient descent computes how changing each weight affects error (the slope), then adjusts weights to move downhill. After many steps, it settles in the valley where error is minimized.",
+      "check_for_understanding": "You're using gradient descent on a loss landscape with multiple valleys of different depths. Your algorithm converges to a shallow valley. What does this tell you about gradient descent, and what could you do differently to potentially find a deeper valley?",
+      "spatial_metaphor": "Ball rolling down a 3D loss surface, leaving a trail showing the path taken",
+      "visualization_hints": {
+        "key_frames": [
+          "Initialize at random point on surface",
+          "Compute gradient (show arrows pointing downhill)",
+          "Take step in negative gradient direction",
+          "Repeat until convergence (ball settles in valley)"
+        ],
+        "emphasis": "Show both parameter space navigation and corresponding loss value decreasing"
+      }
+    },
+    {
+      "id": "ml_decision_boundary_01",
+      "topic": "Decision Boundaries in Classification",
+      "domain": "machine_learning",
+      "difficulty_level": 2,
+      "pedagogical_pattern": "spatial_partitioning_visualization",
+      "core_question": "How does a classifier decide which category a new data point belongs to when there are no explicit rules?",
+      "target_mental_model": "A decision boundary is an invisible dividing line (or surface) that partitions the feature space into regions, one for each class. The classifier learns where to draw this boundary based on training examples, placing it to separate different classes with maximum confidence. New points are classified based on which side of the boundary they fall on.",
+      "common_misconception": "The classifier memorizes all training examples and finds the closest one to make predictions (like a lookup table).",
+      "disambiguating_contrast": "Linear boundary vs nonlinear boundary: A linear boundary (straight line/flat plane) can only separate classes with a simple division, like separating tall vs short people. A nonlinear boundary (curved surface) can handle complex patterns, like separating images of cats vs dogs where no single feature cleanly divides them.",
+      "concrete_anchor": "Email classification: spam vs not-spam. Plot emails in 2D space using two features: number of exclamation marks (x-axis) and number of words in ALL CAPS (y-axis). Training data shows spam clusters in upper-right (many exclamation marks and caps), legitimate emails cluster lower-left. The decision boundary is a line dividing these regions. A new email with 5 exclamation marks and 10 caps words falls above the line → classified as spam.",
+      "check_for_understanding": "Given a dataset where class A forms a ring around class B (like a donut), would a linear decision boundary work well? Why or why not? What kind of boundary would you need?",
+      "spatial_metaphor": "2D scatter plot with colored regions separated by a boundary line/curve",
+      "visualization_hints": {
+        "key_frames": [
+          "Show scattered training points (two colors for two classes)",
+          "Introduce initial boundary (random or simple)",
+          "Adjust boundary during training (watch it shift)",
+          "Final boundary with clear separation",
+          "Test new points falling on different sides"
+        ],
+        "emphasis": "Show how boundary placement affects classification of points near the margin"
+      }
+    },
+    {
+      "id": "ml_convolution_01",
+      "topic": "Convolutions in Neural Networks",
+      "domain": "machine_learning",
+      "difficulty_level": 3,
+      "pedagogical_pattern": "local_operation_visualization",
+      "core_question": "How can a neural network detect patterns like edges, textures, or shapes in images when every image is different?",
+      "target_mental_model": "A convolution is a small pattern detector (filter/kernel) that slides across an image like a magnifying glass, looking for matches. At each position, it compares the filter pattern to the local image patch using element-wise multiplication and summing. Strong matches produce high activation values. Multiple filters detect different patterns (vertical edges, circles, textures), and deeper layers combine these to recognize complex objects.",
+      "common_misconception": "The neural network looks at the entire image at once and somehow 'recognizes' objects globally, like human vision does.",
+      "disambiguating_contrast": "Convolution (local) vs fully-connected (global): A fully-connected layer connects every pixel to every output, treating a pixel in the top-left completely separately from the same pattern in the bottom-right (position-dependent, massive parameters). Convolution uses the same small filter everywhere, detecting patterns regardless of position (translation-invariant, parameter-efficient).",
+      "concrete_anchor": "Detecting vertical edges in a photo: Create a 3×3 filter that looks like [-1, 0, +1] in each row (left negative, middle zero, right positive). Slide this filter over the image. Where there's a sharp transition from dark-to-light (like a door frame edge), the multiplication yields a large positive value. Where there's light-to-dark, large negative. Where there's uniform color, values cancel to near zero. The output is an 'edge map' highlighting vertical edges.",
+      "check_for_understanding": "You have a 5×5 image and use a 3×3 filter with stride 1 and no padding. What size is the output? Why is it smaller than the input? What happens if you apply this convolution repeatedly through multiple layers?",
+      "spatial_metaphor": "3×3 filter sliding across a grid (image), with activation values lighting up",
+      "visualization_hints": {
+        "key_frames": [
+          "Show input image as grid of values",
+          "Introduce filter (3×3 kernel with numbers)",
+          "Slide filter across image, showing element-wise multiplication at each position",
+          "Display output activation map",
+          "Show multiple filters detecting different patterns simultaneously"
+        ],
+        "emphasis": "Highlight the local receptive field and parameter sharing across positions"
+      }
+    }
+  ],
+  "metadata": {
+    "created": "2026-01-10",
+    "version": "0.1.0",
+    "total_exemplars": 3,
+    "domains": ["machine_learning"],
+    "pedagogical_patterns": [
+      "iterative_process_visualization",
+      "spatial_partitioning_visualization",
+      "local_operation_visualization"
+    ]
+  }
+}
