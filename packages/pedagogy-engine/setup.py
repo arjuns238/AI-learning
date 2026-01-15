@@ -6,7 +6,7 @@ setup(
     name="pedagogy-engine",
     version="0.1.0",
     description="AI-powered pedagogical content generation system",
-    packages=find_packages(include=["layer1", "layer1.*", "layer2", "layer2.*"]),
+    packages=find_packages(include=["layer1", "layer1.*", "layer2", "layer2.*", "layer3", "layer3.*"]),
     python_requires=">=3.9",
     install_requires=[
         "pydantic>=2.0.0",
