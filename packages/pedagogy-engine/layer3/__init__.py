@@ -1,27 +1,23 @@
 """
-Layer 3: Storyboard → Scene Specification DSL
+Layer 3: Storyboard → Manim Code Generation Prompt
 
-Compiles pedagogical beats into structured scene programs
-that define what exists and what happens visually.
+Transforms pedagogical storyboards into structured prompts
+designed to elicit accurate ManimCE Python code from an LLM.
 """
 
 __version__ = "0.1.0"
 
 from layer3.schema import (
-    SceneObject,
-    SceneAction,
-    SceneSpec,
-    SceneSpecMetadata,
-    SceneSpecWithMetadata
+    ManimPrompt,
+    ManimPromptMetadata,
+    ManimPromptWithMetadata
 )
 
-from layer3.generator import SceneSpecGenerator
+from layer3.generator import ManimPromptGenerator
 
 __all__ = [
-    "SceneObject",
-    "SceneAction",
-    "SceneSpec",
-    "SceneSpecMetadata",
-    "SceneSpecWithMetadata",
-    "SceneSpecGenerator"
+    "ManimPrompt",
+    "ManimPromptMetadata",
+    "ManimPromptWithMetadata",
+    "ManimPromptGenerator"
 ]
