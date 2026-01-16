@@ -8,6 +8,9 @@ layer2/generator.py
 layer2/patterns.py
 layer2/schema.py
 layer2/sequencer.py
+layer3/__init__.py
+layer3/generator.py
+layer3/schema.py
 pedagogy_engine.egg-info/PKG-INFO
 pedagogy_engine.egg-info/SOURCES.txt
 pedagogy_engine.egg-info/dependency_links.txt
