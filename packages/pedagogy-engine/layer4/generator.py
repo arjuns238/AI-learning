@@ -14,7 +14,7 @@ import time
 import ast
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from dotenv import load_dotenv
 
 from layer3.schema import ManimPromptWithMetadata
@@ -27,6 +27,26 @@ from .schema import (
 # Load environment variables
 load_dotenv()
 
+# RAG imports (optional, will fail gracefully if not installed)
+try:
+    from datasets import load_dataset
+    HAS_DATASETS = True
+except ImportError:
+    HAS_DATASETS = False
+
+try:
+    from sentence_transformers import SentenceTransformer
+    HAS_SENTENCE_TRANSFORMERS = True
+except ImportError:
+    HAS_SENTENCE_TRANSFORMERS = False
+
+try:
+    import chromadb
+    from chromadb.config import Settings
+    HAS_CHROMADB = True
+except ImportError:
+    HAS_CHROMADB = False
+
 
 # ---------- Helpers ----------
 
@@ -35,27 +55,310 @@ def detect_scene_name(code: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
+# ---------- RAG Vector Store ----------
+
+class ManimVectorStore:
+    """
+    Vector store for ManimBench-v1 using Chroma.
+    Stores embeddings persistently in the project data directory.
+    """
+
+    # Store vector database in project data directory
+    VECTORSTORE_DIR = Path(__file__).parent.parent / "data" / "vectorstore"
+    COLLECTION_NAME = "manimdench-v1"
+
+    def __init__(self):
+        self.client = None
+        self.collection = None
+        self.embedder = None
+        self._initialized = False
+        self._init_store()
+
+    def _init_store(self):
+        """Initialize Chroma vector store."""
+        if not HAS_CHROMADB:
+            print("⚠️  chromadb not installed. Install: pip install chromadb")
+            return
+
+        if not HAS_SENTENCE_TRANSFORMERS:
+            print("⚠️  sentence-transformers not installed. Install: pip install sentence-transformers")
+            return
+
+        try:
+            # Create vectorstore directory if it doesn't exist
+            self.VECTORSTORE_DIR.mkdir(parents=True, exist_ok=True)
+
+            # Initialize Chroma client with persistent storage
+            print(f"Initializing vector store at {self.VECTORSTORE_DIR}...")
+            self.client = chromadb.PersistentClient(path=str(self.VECTORSTORE_DIR))
+
+            # Get or create collection
+            self.collection = self.client.get_or_create_collection(
+                name=self.COLLECTION_NAME,
+                metadata={"hnsw:space": "cosine"}
+            )
+
+            # Initialize embedder
+            self.embedder = SentenceTransformer("all-MiniLM-L6-v2")
+
+            self._initialized = True
+            count = self.collection.count()
+            if count > 0:
+                print(f"✓ Vector store initialized with {count} embeddings")
+            else:
+                print("✓ Vector store initialized (empty - call build() to populate)")
+
+        except Exception as e:
+            print(f"⚠️  Failed to initialize vector store: {e}")
+            self._initialized = False
+
+    def build(self, force_rebuild: bool = False):
+        """
+        Build the vector store from ManimBench-v1 dataset.
+        
+        Args:
+            force_rebuild: If True, delete and rebuild the collection
+        """
+        if not self._initialized:
+            print("⚠️  Vector store not initialized")
+            return
+
+        if not HAS_DATASETS:
+            print("⚠️  datasets library not installed. Install: pip install datasets")
+            return
+
+        try:
+            # Check if already populated
+            existing_count = self.collection.count()
+            if existing_count > 0 and not force_rebuild:
+                print(f"✓ Vector store already populated with {existing_count} embeddings")
+                return
+
+            # Delete existing collection if force rebuild
+            if force_rebuild and existing_count > 0:
+                print(f"Deleting existing collection with {existing_count} embeddings...")
+                self.client.delete_collection(name=self.COLLECTION_NAME)
+                self.collection = self.client.get_or_create_collection(
+                    name=self.COLLECTION_NAME,
+                    metadata={"hnsw:space": "cosine"}
+                )
+
+            # Load dataset
+            print("Loading ManimBench-v1 dataset...")
+            dataset = load_dataset("SuienR/ManimBench-v1", split="train")
+            print(f"✓ Loaded {len(dataset)} examples")
+
+            # Process in batches
+            batch_size = 50
+            print(f"Computing embeddings and storing ({len(dataset)} total)...")
+
+            for i in range(0, len(dataset), batch_size):
+                batch = dataset[i : min(i + batch_size, len(dataset))]
+
+                # Extract data
+                ids = [f"example_{j}" for j in range(i, i + len(batch["Code"]))]
+                descriptions = [
+                    batch.get("Reviewed Description", batch.get("Generated Description", ""))[j]
+                    if "Reviewed Description" in batch
+                    else batch.get("Generated Description", [""])[j]
+                    for j in range(len(batch["Code"]))
+                ]
+                codes = batch["Code"]
+                types = batch.get("Type", ["Unknown"] * len(codes))
+
+                # Compute embeddings
+                embeddings = self.embedder.encode(descriptions)
+
+                # Prepare metadata
+                metadatas = [
+                    {
+                        "description": desc,
+                        "type": type_,
+                        "code_preview": code[:100] + "..." if len(code) > 100 else code
+                    }
+                    for desc, type_, code in zip(descriptions, types, codes)
+                ]
+
+                # Store in Chroma (documents for retrieval of full code)
+                self.collection.upsert(
+                    ids=ids,
+                    embeddings=embeddings,
+                    documents=codes,  # Full code stored here
+                    metadatas=metadatas
+                )
+
+                print(f"  Processed {min(i + batch_size, len(dataset))}/{len(dataset)} examples")
+
+            print(f"✓ Vector store built successfully with {self.collection.count()} embeddings")
+
+        except Exception as e:
+            print(f"⚠️  Failed to build vector store: {e}")
+
+    def retrieve(self, query: str, top_k: int = 3) -> List[dict]:
+        """
+        Retrieve top-k similar examples.
+        
+        Args:
+            query: Query description or prompt
+            top_k: Number of results to return
+            
+        Returns:
+            List of dicts with 'description', 'code', 'type', 'similarity'
+        """
+        if not self._initialized or self.collection is None:
+            return []
+
+        try:
+            # Query the collection
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=top_k,
+                include=["documents", "metadatas", "distances"]
+            )
+
+            # Format results
+            output = []
+            if results and results["documents"] and len(results["documents"]) > 0:
+                for i, doc in enumerate(results["documents"][0]):
+                    metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+                    distance = results["distances"][0][i] if results["distances"] else 0
+                    # Convert distance to similarity (cosine distance to similarity)
+                    similarity = 1 - distance
+
+                    output.append({
+                        "description": metadata.get("description", ""),
+                        "code": doc,
+                        "type": metadata.get("type", "Unknown"),
+                        "similarity": float(similarity)
+                    })
+
+            return output
+
+        except Exception as e:
+            print(f"⚠️  Error during retrieval: {e}")
+            return []
+
+
+# ---------- RAG Retriever ----------
+
+class ManimBenchRetriever:
+    """
+    Retrieves relevant examples from ManimBench-v1 using vector store.
+    """
+
+    def __init__(self):
+        self.vector_store = ManimVectorStore()
+        self._initialized = self.vector_store._initialized
+
+    def retrieve(self, query: str, top_k: int = 3) -> List[dict]:
+        """Delegate to vector store."""
+        return self.vector_store.retrieve(query, top_k)
+        """
+        Retrieve top-k most similar examples from ManimBench-v1.
+        
+        Args:
+            query: Description or prompt to find similar examples for
+            top_k: Number of examples to retrieve
+            
+        Returns:
+            List of dicts with 'description' and 'code' keys
+        """
+        if not self._initialized or self.dataset is None:
+            return []
+
+        try:
+            import numpy as np
+            
+            # Encode the query
+            query_embedding = self.embedder.encode(query)
+            
+            # Compute similarities
+            similarities = np.dot(self.embeddings, query_embedding)
+            top_indices = np.argsort(similarities)[::-1][:top_k]
+            
+            # Retrieve examples
+            results = []
+            for idx in top_indices:
+                example = self.dataset[int(idx)]
+                results.append({
+                    "description": example.get("Reviewed Description", example.get("Generated Description", "")),
+                    "code": example.get("Code", ""),
+                    "type": example.get("Type", "Unknown"),
+                    "similarity": float(similarities[idx])
+                })
+            
+            return results
+        except Exception as e:
+            print(f"⚠️  Error during retrieval: {e}")
+            return []
+
+
 # ---------- Code Generator ----------
 
 class ManimCodeGenerator:
     """
-    Calls ChatGPT to generate ManimCE code from Layer 3 prompts.
+    Calls an LLM API to generate ManimCE code from Layer 3 prompts.
+    Supports: Anthropic Claude, OpenAI GPT
+    Optionally uses RAG (Retrieval-Augmented Generation) with ManimBench-v1 examples.
     """
 
     def __init__(
         self,
         model_name: Optional[str] = None,
-        temperature: float = 0.0,
-        api_provider: str = "openai"
+        temperature: Optional[float] = None,
+        api_provider: str = "anthropic",
+        use_rag: bool = True,
+        rag_examples: int = 3
     ):
         self.api_provider = api_provider
-        self.model_name = model_name or os.getenv("DEFAULT_MODEL", "gpt-4o-mini")
-        self.temperature = temperature
+        self.use_rag = use_rag
+        self.rag_examples = rag_examples
 
-        if self.api_provider == "openai":
+        # Initialize RAG retriever if enabled
+        self.retriever = None
+        if self.use_rag:
+            try:
+                self.retriever = ManimBenchRetriever()
+            except Exception as e:
+                print(f"⚠️  RAG initialization failed: {e}. Continuing without RAG.")
+                self.use_rag = False
+
+        # Set default model based on provider
+        if model_name:
+            self.model_name = model_name
+        else:
+            default_models = {
+                "anthropic": "claude-sonnet-4-5-20250929",
+                "openai": "gpt-5"
+            }
+            self.model_name = default_models.get(api_provider, "claude-sonnet-4-5-20250929")
+
+        # Read temperature from env or use provided value or default to 0.0
+        if temperature is not None:
+            self.temperature = temperature
+        else:
+            self.temperature = float(os.getenv("DEFAULT_TEMPERATURE", "0.0"))
+
+        if self.api_provider == "anthropic":
+            self._init_anthropic()
+        elif self.api_provider == "openai":
             self._init_openai()
         else:
-            raise ValueError("Only 'openai' provider supported")
+            raise ValueError(f"Unsupported API provider: {api_provider}. Use 'anthropic' or 'openai'")
+
+    def _init_anthropic(self):
+        try:
+            from anthropic import Anthropic
+        except ImportError:
+            raise ImportError("Run: pip install anthropic")
+
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY not set in environment")
+
+        self.client = Anthropic(api_key=api_key)
+        print(f"✓ Anthropic Claude initialized: {self.model_name}")
+        print(f"  Temperature: {self.temperature}")
 
     def _init_openai(self):
         try:
@@ -69,6 +372,56 @@ class ManimCodeGenerator:
 
         self.client = OpenAI(api_key=api_key)
         print(f"✓ OpenAI initialized: {self.model_name}")
+        if self.model_name == "gpt-5":
+            print(" Temperature is managed internally for gpt-5; ignoring provided value.")
+        else:
+            print(f"  Temperature: {self.temperature}")
+
+    def _augment_prompt_with_rag(self, user_prompt: str) -> str:
+        """
+        Augment the user prompt with similar examples from ManimBench-v1.
+        Uses RAG to retrieve relevant code examples as few-shot demonstrations.
+        """
+        if not self.use_rag or not self.retriever:
+            return user_prompt
+
+        try:
+            # Retrieve similar examples
+            examples = self.retriever.retrieve(user_prompt, top_k=self.rag_examples)
+            
+            if not examples:
+                return user_prompt
+            
+            # Build few-shot examples section
+            examples_text = "\n\n## Similar Examples from ManimBench-v1:\n"
+            
+            for i, example in enumerate(examples, 1):
+                examples_text += f"\n### Example {i} (Type: {example['type']}, Similarity: {example['similarity']:.2f})\n"
+                examples_text += f"Description: {example['description']}\n\n"
+                examples_text += f"Code:\n```python\n{example['code']}\n```\n"
+            
+            examples_text += "\n## Now generate code for the following task:\n\n"
+            
+            augmented_prompt = examples_text + user_prompt
+            
+            print(f"✓ RAG augmentation: Retrieved {len(examples)} similar examples")
+            return augmented_prompt
+            
+        except Exception as e:
+            print(f"⚠️  RAG augmentation failed: {e}. Using original prompt.")
+            return user_prompt
+
+    def _call_anthropic(self, system_prompt: str, user_prompt: str) -> str:
+        response = self.client.messages.create(
+            model=self.model_name,
+            max_tokens=8192,
+            temperature=self.temperature,
+            system=system_prompt,
+            messages=[
+                {"role": "user", "content": user_prompt}
+            ]
+        )
+        return response.content[0].text
 
     def _call_openai(self, system_prompt: str, user_prompt: str) -> str:
         response = self.client.chat.completions.create(
@@ -77,8 +430,8 @@ class ManimCodeGenerator:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=self.temperature,
-            max_tokens=8192
+            # temperature=self.temperature,
+            max_completion_tokens=8192
         )
         return response.choices[0].message.content
 
@@ -130,6 +483,11 @@ class ManimCodeGenerator:
     def generate(self, manim_prompt: ManimPromptWithMetadata) -> ManimCodeResponse:
         prompt = manim_prompt.prompt
 
+        # Augment user prompt with RAG examples if enabled
+        user_prompt = prompt.user_prompt
+        if self.use_rag:
+            user_prompt = self._augment_prompt_with_rag(user_prompt)
+
         system_prompt = prompt.system_instruction + """
 
 CRITICAL OUTPUT RULES:
@@ -139,10 +497,19 @@ CRITICAL OUTPUT RULES:
 - The first non-empty line must be: from manim import *
 """
 
-        full_response = self._call_openai(
-            system_prompt=system_prompt,
-            user_prompt=prompt.user_prompt
-        )
+        # Call the appropriate API based on provider
+        if self.api_provider == "anthropic":
+            full_response = self._call_anthropic(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt
+            )
+        elif self.api_provider == "openai":
+            full_response = self._call_openai(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt
+            )
+        else:
+            raise ValueError(f"Unknown API provider: {self.api_provider}")
 
         code = self.extract_python_code(full_response)
 
@@ -165,7 +532,6 @@ class ManimExecutor:
         self,
         resolution: str = "1080p60",
         quality: str = "high_quality",
-        #output_dir: str = "media/videos"
         output_dir: str = "output/videos"
     ):
         self.resolution = resolution
@@ -232,6 +598,10 @@ class ManimExecutor:
                 video_path = self._find_video_file(scene_name)
                 if video_path:
                     print(f"✓ Video generated successfully: {video_path}")
+
+                    # Clean up partial movie files to save space
+                    self._cleanup_partial_files(video_path)
+
                     return VideoExecutionResult(
                         success=True,
                         video_path=str(video_path),
@@ -273,16 +643,61 @@ class ManimExecutor:
         return mapping.get(resolution, "-pqh")
 
     def _find_video_file(self, scene_name: str) -> Optional[Path]:
-        search_paths = [
-            self.output_dir / "videos" / "1080p60" / f"{scene_name}.mp4",
-            self.output_dir / "videos" / "720p30" / f"{scene_name}.mp4",
-            self.output_dir / "videos" / "480p15" / f"{scene_name}.mp4",
+        """
+        Find the generated video file.
+        Manim creates videos in media/videos/<temp_file_name>/<resolution>/<scene_name>.mp4
+        """
+        # Resolution folder mapping
+        resolution_folders = {
+            "1080p60": "1080p60",
+            "1080p30": "1080p30",
+            "720p60": "720p60",
+            "720p30": "720p30",
+            "480p30": "480p30",
+            "480p15": "480p15"
+        }
+
+        resolution_folder = resolution_folders.get(self.resolution, "1080p60")
+
+        # Manim creates: output_dir/media/videos/<temp_script_name>/<resolution>/<scene>.mp4
+        media_videos_dir = self.output_dir / "media" / "videos"
+
+        if media_videos_dir.exists():
+            # Search through all subdirectories (temp file names)
+            for temp_dir in media_videos_dir.iterdir():
+                if temp_dir.is_dir():
+                    video_path = temp_dir / resolution_folder / f"{scene_name}.mp4"
+                    if video_path.exists():
+                        return video_path
+
+        # Fallback: check old paths for backward compatibility
+        fallback_paths = [
+            self.output_dir / "videos" / resolution_folder / f"{scene_name}.mp4",
             self.output_dir / f"{scene_name}.mp4"
         ]
-        for path in search_paths:
+        for path in fallback_paths:
             if path.exists():
                 return path
+
         return None
+
+    def _cleanup_partial_files(self, video_path: Path):
+        """
+        Clean up Manim's partial movie files to save disk space.
+        These are intermediate files created during rendering.
+        """
+        try:
+            # video_path is like: output/videos/media/videos/tmpXXX/480p15/SceneName.mp4
+            # partial_files are in: output/videos/media/videos/tmpXXX/480p15/partial_movie_files/
+            partial_dir = video_path.parent / "partial_movie_files"
+
+            if partial_dir.exists():
+                import shutil
+                shutil.rmtree(partial_dir)
+                print(f"  Cleaned up partial movie files")
+        except Exception as e:
+            # Non-critical, just log and continue
+            print(f"  Warning: Could not clean up partial files: {e}")
 
 
 # ---------- Orchestrator ----------
@@ -290,20 +705,26 @@ class ManimExecutor:
 class Layer4Generator:
     """
     Orchestrates: Prompt → Code → Validation → Execution
+    Supports RAG (Retrieval-Augmented Generation) with ManimBench-v1 dataset.
     """
 
     def __init__(
         self,
+        api_provider: str = "anthropic",
         code_model: Optional[str] = None,
         code_temperature: float = 0.0,
         manim_resolution: str = "1080p60",
         manim_quality: str = "high_quality",
-        #output_dir: str = "media/videos"
-        output_dir: str = "output/videos"
+        output_dir: str = "output/videos",
+        use_rag: bool = True,
+        rag_examples: int = 3
     ):
         self.code_generator = ManimCodeGenerator(
+            api_provider=api_provider,
             model_name=code_model,
-            temperature=code_temperature
+            temperature=code_temperature,
+            use_rag=use_rag,
+            rag_examples=rag_examples
         )
         self.executor = ManimExecutor(
             resolution=manim_resolution,
@@ -441,16 +862,23 @@ def main():
         help="Name of the Scene class to render"
     )
     parser.add_argument(
+        "--api-provider",
+        type=str,
+        default="anthropic",
+        choices=["anthropic", "openai"],
+        help="LLM API provider (default: anthropic)"
+    )
+    parser.add_argument(
         "--code-model",
         type=str,
-        default="gpt-4o-mini",
-        help="OpenAI model for code generation"
+        default=None,
+        help="Model for code generation (default: claude-sonnet-4-5-20250929 for anthropic, gpt-4o for openai)"
     )
     parser.add_argument(
         "--code-temperature",
         type=float,
-        default=0.0,
-        help="Temperature for code generation (should be low)"
+        default=None,
+        help="Temperature for code generation (default: reads DEFAULT_TEMPERATURE from .env, fallback to 0.0)"
     )
     parser.add_argument(
         "--resolution",
@@ -471,8 +899,28 @@ def main():
         type=str,
         help="Path to save execution record JSON"
     )
+    parser.add_argument(
+        "--use-rag",
+        action="store_true",
+        default=True,
+        help="Enable RAG (Retrieval-Augmented Generation) with ManimBench-v1 (default: True)"
+    )
+    parser.add_argument(
+        "--no-rag",
+        action="store_true",
+        help="Disable RAG augmentation"
+    )
+    parser.add_argument(
+        "--rag-examples",
+        type=int,
+        default=3,
+        help="Number of RAG examples to retrieve (default: 3)"
+    )
 
     args = parser.parse_args()
+
+    # Handle --no-rag flag
+    use_rag = not args.no_rag if args.no_rag else args.use_rag
 
     with open(args.prompt_file, 'r') as f:
         data = json.load(f)
@@ -486,10 +934,13 @@ def main():
         output_file = Path(args.output_file)
 
     generator = Layer4Generator(
+        api_provider=args.api_provider,
         code_model=args.code_model,
         code_temperature=args.code_temperature,
         manim_resolution=args.resolution,
-        manim_quality=args.quality
+        manim_quality=args.quality,
+        use_rag=use_rag,
+        rag_examples=args.rag_examples
     )
 
     generator.generate(

@@ -1,14 +1,105 @@
-# Manim Code Generation Training Strategy (Layer 4)
+# Manim Code Generation Strategy (Layer 4)
 
 ## Executive Summary
 
-**Approach:** Multi-stage QLoRA training on DeepSeek-Coder-33B-base with execution-based evaluation
+Layer 4 supports **two complementary approaches** for generating Manim code from Layer 3 prompts:
 
-**Training Pipeline:** DAPT (Manim fluency) → Step-level SFT (instruction following) → Scene-level SFT (full synthesis)
+### Approach 1: ChatGPT API (Quick Start) ✅ IMPLEMENTED
+- **Status:** Production-ready
+- **Method:** GPT-4o-mini with self-repair retry logic
+- **Timeline:** Immediate (already implemented)
+- **Cost:** ~$0.01-0.05 per video (API calls)
+- **Target:** 60-80% execution success rate (empirical)
+- **Pros:** Zero setup, fast iteration, good for prototyping
+- **Cons:** API costs scale with usage, no fine-tuning control
 
-**Timeline:** 4-6 weeks | **Cost:** $875-1,175 | **Target:** 70%+ execution success rate
+### Approach 2: Custom Model Training (Long-term) 📋 PLANNED
+- **Method:** Multi-stage QLoRA training on DeepSeek-Coder-33B-base
+- **Training Pipeline:** DAPT → Step-level SFT → Scene-level SFT
+- **Timeline:** 4-6 weeks
+- **Cost:** $875-1,175 (one-time training)
+- **Target:** 70%+ execution success rate
+- **Pros:** Full control, no runtime API costs, domain-optimized
+- **Cons:** Upfront time/cost, requires GPU infrastructure
+
+**Current Focus:** Approach 1 for immediate results, Approach 2 for future optimization
 
 ---
+
+# Approach 1: ChatGPT API Implementation (Current)
+
+## Architecture
+
+```
+Layer 3 Prompt → ChatGPT API → Code Generation → Validation → Manim Execution → Video
+                      ↑                                ↓
+                      └────── Error Feedback (retry) ──┘
+```
+
+## Implementation: [generator.py](../packages/pedagogy-engine/layer4/generator.py)
+
+### Core Components
+
+**1. ManimCodeGenerator**
+- Calls OpenAI GPT-4o-mini with Layer 3 prompts
+- Extracts Python code from markdown/text responses
+- Static validation: AST parsing, import checks, scene class detection
+- Default temperature: 0.0 (deterministic)
+
+**2. ManimExecutor**
+- Executes generated code via Manim CLI in subprocess
+- Configurable resolution (1080p60, 720p30, etc.)
+- Timeout protection (600s default)
+- Video path detection and verification
+
+**3. Layer4Generator (Orchestrator)**
+- Retry logic: up to 3 attempts
+- Self-repair: feeds validation/runtime errors back to ChatGPT
+- Tracks metadata: source prompts, execution time, success/failure
+- Saves execution records as JSON
+
+## Configuration
+
+```python
+generator = Layer4Generator(
+    code_model="gpt-4o-mini",      # or "gpt-4" for higher quality
+    code_temperature=0.0,           # deterministic
+    manim_resolution="1080p60",     # video quality
+    output_dir="output/videos"      # where videos are saved
+)
+```
+
+## Self-Repair Strategy
+
+When code fails:
+1. **Validation error** → Append error message to prompt, ask ChatGPT to fix
+2. **Runtime error** → Include Manim output log (truncated to 2000 chars), request correction
+3. **Max 3 attempts** → Prevents infinite loops
+
+## Current Limitations
+
+- No dataset validation yet (scripts exist but not run)
+- No systematic evaluation metrics
+- Prompt engineering is basic (system + user prompt)
+- No caching or deduplication of similar prompts
+
+## Quick Start
+
+```bash
+# Set API key
+export OPENAI_API_KEY="sk-..."
+
+# Run with Layer 3 prompt
+python -m layer4.generator \
+    --prompt-file data/layer3/gradient_descent_manim_prompt.json \
+    --code-model gpt-4o-mini \
+    --resolution 1080p60 \
+    --output-file output/videos/gradient_descent_execution.json
+```
+
+---
+
+# Approach 2: Custom Model Training (Planned)
 
 ## 1. Base Model & Infrastructure
 

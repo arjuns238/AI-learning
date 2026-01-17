@@ -1,4 +1,0 @@
-# This file is used internally by FFMPEG.
-file 'file:/Users/asri/Projects/AI-learning/media/videos/manim-test/1080p60/partial_movie_files/SquareToCircle/3544663784_3901458704_223132457.mp4'
-file 'file:/Users/asri/Projects/AI-learning/media/videos/manim-test/1080p60/partial_movie_files/SquareToCircle/260329756_1381012039_557880437.mp4'
-file 'file:/Users/asri/Projects/AI-learning/media/videos/manim-test/1080p60/partial_movie_files/SquareToCircle/260329756_1542183986_3783344410.mp4'
