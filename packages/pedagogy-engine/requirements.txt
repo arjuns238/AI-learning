@@ -17,3 +17,8 @@ pytest-cov>=4.1.0
 # Utilities
 python-dotenv>=1.0.0
 pyyaml>=6.0.0
+
+# Layer 4: Manim dataset validation
+datasets>=2.14.0
+manim>=0.18.0
+docker>=6.0.0
