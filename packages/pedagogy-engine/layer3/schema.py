@@ -1,0 +1,58 @@
+"""
+Pydantic models for Layer 3: Manim Prompt Schema
+"""
+
+from pydantic import BaseModel, Field
+from typing import Optional, List
+from datetime import datetime
+
+
+class ManimPrompt(BaseModel):
+    """
+    A single prompt intended to generate ManimCE Python code.
+    """
+
+    title: str = Field(
+        ...,
+        description="Short descriptive title of the animation request"
+    )
+
+    system_instruction: str = Field(
+        ...,
+        description="High-level instruction to the code-generation model"
+    )
+
+    user_prompt: str = Field(
+        ...,
+        description="Detailed prompt describing the desired animation"
+    )
+
+    constraints: Optional[List[str]] = Field(
+        default=None,
+        description="Hard constraints the generated code must follow"
+    )
+
+
+class ManimPromptMetadata(BaseModel):
+    """
+    Metadata for prompt generation and traceability.
+    """
+
+    generator_version: str = "0.1.0"
+    source_storyboard_topic: str
+    pedagogical_pattern: Optional[str]
+    generation_timestamp: str
+    source_layer2_id: Optional[str] = None
+
+
+class ManimPromptWithMetadata(BaseModel):
+    """
+    Bundle of prompt and metadata.
+    """
+
+    prompt: ManimPrompt
+    metadata: ManimPromptMetadata
+
+    def model_dump_json_formatted(self) -> str:
+        import json
+        return json.dumps(self.model_dump(), indent=2)
