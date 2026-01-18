@@ -23,6 +23,7 @@ from .schema import (
     VideoExecutionResult,
     ManimExecutionWithMetadata,
 )
+from .manim_api_reference import get_relevant_manim_apis
 
 # Load environment variables
 load_dotenv()
@@ -33,6 +34,12 @@ try:
     HAS_DATASETS = True
 except ImportError:
     HAS_DATASETS = False
+
+try:
+    import pandas as pd
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -112,19 +119,85 @@ class ManimVectorStore:
             print(f"⚠️  Failed to initialize vector store: {e}")
             self._initialized = False
 
+    def _load_dataset_pandas(self) -> Optional['pd.DataFrame']:
+        """
+        Load ManimBench-v1 dataset using pandas from parquet format.
+        Falls back to HuggingFace datasets if pandas fails.
+
+        Returns:
+            DataFrame with 'Code', 'Reviewed Description', 'Generated Description', 'Type' columns
+        """
+        if not HAS_PANDAS:
+            print("⚠️  pandas not installed. Install: pip install pandas")
+            return None
+
+        try:
+            print("Loading ManimBench-v1 dataset with pandas from HuggingFace...")
+
+            # First, fetch the dataset info to get the correct split filename
+            from huggingface_hub import hf_hub_url
+            import requests
+
+            # Get dataset info
+            api_url = "https://huggingface.co/api/datasets/SuienR/ManimBench-v1"
+            response = requests.get(api_url)
+            dataset_info = response.json()
+
+            # Find the train split file
+            train_file = None
+            if 'siblings' in dataset_info:
+                for file in dataset_info['siblings']:
+                    if 'train' in file['rfilename'] and file['rfilename'].endswith('.parquet'):
+                        train_file = file['rfilename']
+                        break
+
+            if not train_file:
+                # Fallback to common naming pattern
+                train_file = "data/train-00000-of-00001.parquet"
+
+            # Load using pandas with hf:// protocol
+            hf_path = f"hf://datasets/SuienR/ManimBench-v1/{train_file}"
+            print(f"  Reading from: {hf_path}")
+            df = pd.read_parquet(hf_path)
+            print(f"✓ Loaded {len(df)} examples via pandas")
+            return df
+
+        except Exception as e:
+            print(f"⚠️  Failed to load via pandas with HuggingFace hub: {e}")
+
+            # Try simpler direct path
+            try:
+                print("Trying direct parquet path...")
+                df = pd.read_parquet("hf://datasets/SuienR/ManimBench-v1/data/train-00000-of-00001.parquet")
+                print(f"✓ Loaded {len(df)} examples via pandas")
+                return df
+            except Exception as e2:
+                print(f"⚠️  Direct path also failed: {e2}")
+
+            # Fallback to HuggingFace datasets library
+            if HAS_DATASETS:
+                print("Falling back to HuggingFace datasets library...")
+                try:
+                    dataset = load_dataset("SuienR/ManimBench-v1", split="train")
+                    df = dataset.to_pandas()
+                    print(f"✓ Loaded {len(df)} examples via HuggingFace datasets")
+                    return df
+                except Exception as e3:
+                    print(f"⚠️  HuggingFace datasets also failed: {e3}")
+                    return None
+            else:
+                print("⚠️  datasets library not installed as fallback")
+                return None
+
     def build(self, force_rebuild: bool = False):
         """
-        Build the vector store from ManimBench-v1 dataset.
-        
+        Build the vector store from ManimBench-v1 dataset using pandas.
+
         Args:
             force_rebuild: If True, delete and rebuild the collection
         """
         if not self._initialized:
             print("⚠️  Vector store not initialized")
-            return
-
-        if not HAS_DATASETS:
-            print("⚠️  datasets library not installed. Install: pip install datasets")
             return
 
         try:
@@ -143,31 +216,38 @@ class ManimVectorStore:
                     metadata={"hnsw:space": "cosine"}
                 )
 
-            # Load dataset
-            print("Loading ManimBench-v1 dataset...")
-            dataset = load_dataset("SuienR/ManimBench-v1", split="train")
-            print(f"✓ Loaded {len(dataset)} examples")
+            # Load dataset using pandas
+            df = self._load_dataset_pandas()
+            if df is None:
+                print("⚠️  Failed to load dataset")
+                return
 
             # Process in batches
             batch_size = 50
-            print(f"Computing embeddings and storing ({len(dataset)} total)...")
+            total_examples = len(df)
+            print(f"Computing embeddings and storing ({total_examples} total)...")
 
-            for i in range(0, len(dataset), batch_size):
-                batch = dataset[i : min(i + batch_size, len(dataset))]
+            for i in range(0, total_examples, batch_size):
+                batch_df = df.iloc[i : min(i + batch_size, total_examples)]
 
-                # Extract data
-                ids = [f"example_{j}" for j in range(i, i + len(batch["Code"]))]
-                descriptions = [
-                    batch.get("Reviewed Description", batch.get("Generated Description", ""))[j]
-                    if "Reviewed Description" in batch
-                    else batch.get("Generated Description", [""])[j]
-                    for j in range(len(batch["Code"]))
-                ]
-                codes = batch["Code"]
-                types = batch.get("Type", ["Unknown"] * len(codes))
+                # Extract data from DataFrame
+                ids = [f"example_{j}" for j in range(i, i + len(batch_df))]
+
+                # Get descriptions (prefer Reviewed Description, fallback to Generated Description)
+                descriptions = []
+                for _, row in batch_df.iterrows():
+                    if 'Reviewed Description' in row and pd.notna(row['Reviewed Description']):
+                        descriptions.append(str(row['Reviewed Description']))
+                    elif 'Generated Description' in row and pd.notna(row['Generated Description']):
+                        descriptions.append(str(row['Generated Description']))
+                    else:
+                        descriptions.append("")
+
+                codes = [str(code) for code in batch_df['Code'].tolist()]
+                types = [str(t) if pd.notna(t) else "Unknown" for t in batch_df.get('Type', pd.Series(['Unknown'] * len(batch_df))).tolist()]
 
                 # Compute embeddings
-                embeddings = self.embedder.encode(descriptions)
+                embeddings = self.embedder.encode(descriptions).tolist()
 
                 # Prepare metadata
                 metadatas = [
@@ -187,12 +267,14 @@ class ManimVectorStore:
                     metadatas=metadatas
                 )
 
-                print(f"  Processed {min(i + batch_size, len(dataset))}/{len(dataset)} examples")
+                print(f"  Processed {min(i + batch_size, total_examples)}/{total_examples} examples")
 
             print(f"✓ Vector store built successfully with {self.collection.count()} embeddings")
 
         except Exception as e:
             print(f"⚠️  Failed to build vector store: {e}")
+            import traceback
+            traceback.print_exc()
 
     def retrieve(self, query: str, top_k: int = 3) -> List[dict]:
         """
@@ -329,7 +411,8 @@ class ManimCodeGenerator:
         else:
             default_models = {
                 "anthropic": "claude-sonnet-4-5-20250929",
-                "openai": "gpt-5"
+                "openai": "gpt-5",
+                "deepseek": "deepseek-reasoner"
             }
             self.model_name = default_models.get(api_provider, "claude-sonnet-4-5-20250929")
 
@@ -343,8 +426,10 @@ class ManimCodeGenerator:
             self._init_anthropic()
         elif self.api_provider == "openai":
             self._init_openai()
+        elif self.api_provider == "deepseek":
+            self._init_deepseek()
         else:
-            raise ValueError(f"Unsupported API provider: {api_provider}. Use 'anthropic' or 'openai'")
+            raise ValueError(f"Unsupported API provider: {api_provider}. Use 'anthropic', 'openai', or 'deepseek'")
 
     def _init_anthropic(self):
         try:
@@ -377,36 +462,83 @@ class ManimCodeGenerator:
         else:
             print(f"  Temperature: {self.temperature}")
 
-    def _augment_prompt_with_rag(self, user_prompt: str) -> str:
+    def _init_deepseek(self):
+        try:
+            from openai import OpenAI
+        except ImportError:
+            raise ImportError("Run: pip install openai")
+
+        api_key = os.getenv("DEEPSEEK_API_KEY")
+        if not api_key:
+            raise ValueError("DEEPSEEK_API_KEY not set in environment")
+
+        # DeepSeek uses OpenAI-compatible API
+        self.client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+        print(f"✓ DeepSeek initialized: {self.model_name}")
+        print(f"  Temperature: {self.temperature}")
+
+    def _augment_prompt_with_rag(self, user_prompt: str, metadata: dict = None) -> str:
         """
         Augment the user prompt with similar examples from ManimBench-v1.
-        Uses RAG to retrieve relevant code examples as few-shot demonstrations.
+        Uses pedagogical context to improve retrieval relevance.
         """
         if not self.use_rag or not self.retriever:
             return user_prompt
 
         try:
+            # Build enhanced query with pedagogical context
+            query = user_prompt
+
+            # Add pedagogical context to query if available
+            if metadata and 'pedagogical_context' in metadata:
+                ped_ctx = metadata['pedagogical_context']
+                query_parts = [user_prompt]
+
+                # Include key pedagogical elements in search
+                if 'visual_metaphor' in ped_ctx:
+                    query_parts.append(f"Visual metaphor: {ped_ctx['visual_metaphor']}")
+                if 'pedagogical_pattern' in ped_ctx:
+                    query_parts.append(f"Pattern: {ped_ctx['pedagogical_pattern']}")
+                if 'key_insight' in ped_ctx:
+                    query_parts.append(f"Key concept: {ped_ctx['key_insight']}")
+
+                query = " ".join(query_parts)
+                print(f"✓ RAG query enhanced with pedagogical context")
+                print(f"\nEnhanced RAG Query (first 200 chars):\n{query[:200]}...\n")
+
             # Retrieve similar examples
-            examples = self.retriever.retrieve(user_prompt, top_k=self.rag_examples)
-            
+            examples = self.retriever.retrieve(query, top_k=self.rag_examples)
+
             if not examples:
                 return user_prompt
-            
+
+            # Print detailed retrieval results
+            print(f"\n{'='*60}")
+            print(f"RAG RETRIEVAL RESULTS (Top {len(examples)} examples)")
+            print(f"{'='*60}")
+            for i, example in enumerate(examples, 1):
+                print(f"\n[Example {i}]")
+                print(f"  Type: {example['type']}")
+                print(f"  Similarity: {example['similarity']:.3f}")
+                print(f"  Description: {example['description'][:150]}...")
+                print(f"  Code preview: {example['code'][:100]}...")
+            print(f"{'='*60}\n")
+
             # Build few-shot examples section
             examples_text = "\n\n## Similar Examples from ManimBench-v1:\n"
-            
+
             for i, example in enumerate(examples, 1):
                 examples_text += f"\n### Example {i} (Type: {example['type']}, Similarity: {example['similarity']:.2f})\n"
                 examples_text += f"Description: {example['description']}\n\n"
                 examples_text += f"Code:\n```python\n{example['code']}\n```\n"
-            
+
             examples_text += "\n## Now generate code for the following task:\n\n"
-            
+
             augmented_prompt = examples_text + user_prompt
-            
+
             print(f"✓ RAG augmentation: Retrieved {len(examples)} similar examples")
             return augmented_prompt
-            
+
         except Exception as e:
             print(f"⚠️  RAG augmentation failed: {e}. Using original prompt.")
             return user_prompt
@@ -432,6 +564,18 @@ class ManimCodeGenerator:
             ],
             # temperature=self.temperature,
             max_completion_tokens=8192
+        )
+        return response.choices[0].message.content
+
+    def _call_deepseek(self, system_prompt: str, user_prompt: str) -> str:
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=self.temperature,
+            max_tokens=8192
         )
         return response.choices[0].message.content
 
@@ -483,10 +627,48 @@ class ManimCodeGenerator:
     def generate(self, manim_prompt: ManimPromptWithMetadata) -> ManimCodeResponse:
         prompt = manim_prompt.prompt
 
-        # Augment user prompt with RAG examples if enabled
-        user_prompt = prompt.user_prompt
+        # Extract metadata for pedagogical context
+        metadata = manim_prompt.metadata.model_dump() if hasattr(manim_prompt.metadata, 'model_dump') else manim_prompt.metadata.__dict__
+
+        # Build pedagogical preamble if context available
+        pedagogical_preamble = ""
+        if 'pedagogical_context' in metadata and metadata['pedagogical_context']:
+            ped_ctx = metadata['pedagogical_context']
+            pedagogical_preamble = f"""
+## Pedagogical Context
+
+**Educational Goal:** This visualization helps learners understand: "{ped_ctx.get('core_question', 'N/A')}"
+
+**Target Mental Model:** {ped_ctx.get('target_mental_model', 'N/A')}
+
+**Common Misconception to Address:** {ped_ctx.get('common_misconception', 'N/A')}
+
+**Visual Metaphor:** {ped_ctx.get('visual_metaphor', 'N/A')}
+
+**Key Insight:** {ped_ctx.get('key_insight', 'N/A')}
+
+**Design Guidance:** Create code that makes this mental model concrete and addresses the misconception visually.
+
+"""
+            print(f"✓ Including pedagogical context in prompt")
+
+        # Get relevant Manim API reference based on scene specification
+        api_reference = get_relevant_manim_apis(prompt.user_prompt)
+        if api_reference:
+            print(f"✓ Added contextual Manim API reference")
+
+        # Augment user prompt with RAG examples (now includes pedagogical context in query)
+        base_user_prompt = prompt.user_prompt
         if self.use_rag:
-            user_prompt = self._augment_prompt_with_rag(user_prompt)
+            base_user_prompt = self._augment_prompt_with_rag(base_user_prompt, metadata)
+
+        # Build final prompt in order: Pedagogical Context → API Reference → RAG Examples → Scene Spec
+        user_prompt = ""
+        if pedagogical_preamble:
+            user_prompt += pedagogical_preamble
+        if api_reference:
+            user_prompt += api_reference
+        user_prompt += base_user_prompt
 
         system_prompt = prompt.system_instruction + """
 
@@ -505,6 +687,11 @@ CRITICAL OUTPUT RULES:
             )
         elif self.api_provider == "openai":
             full_response = self._call_openai(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt
+            )
+        elif self.api_provider == "deepseek":
+            full_response = self._call_deepseek(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt
             )
@@ -865,14 +1052,14 @@ def main():
         "--api-provider",
         type=str,
         default="anthropic",
-        choices=["anthropic", "openai"],
+        choices=["anthropic", "openai", "deepseek"],
         help="LLM API provider (default: anthropic)"
     )
     parser.add_argument(
         "--code-model",
         type=str,
         default=None,
-        help="Model for code generation (default: claude-sonnet-4-5-20250929 for anthropic, gpt-4o for openai)"
+        help="Model for code generation (default: claude-sonnet-4-5-20250929 for anthropic, gpt-4o for openai, deepseek-chat for deepseek)"
     )
     parser.add_argument(
         "--code-temperature",

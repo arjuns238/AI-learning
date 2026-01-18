@@ -8,7 +8,7 @@ numpy>=1.24.0
 
 # API clients
 anthropic>=0.18.0
-openai>=1.0.0
+openai>=1.0.0  # Used for OpenAI and DeepSeek (OpenAI-compatible API)
 
 # Testing
 pytest>=7.4.0

@@ -3,7 +3,7 @@ Pydantic models for Layer 3: Manim Prompt Schema
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 
@@ -43,6 +43,12 @@ class ManimPromptMetadata(BaseModel):
     pedagogical_pattern: Optional[str]
     generation_timestamp: str
     source_layer2_id: Optional[str] = None
+
+    # NEW: Pedagogical context (optional for backwards compatibility)
+    pedagogical_context: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Pedagogical reasoning and educational goals for this visualization"
+    )
 
 
 class ManimPromptWithMetadata(BaseModel):
