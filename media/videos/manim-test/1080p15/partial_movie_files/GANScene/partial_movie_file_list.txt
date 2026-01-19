@@ -1,0 +1,8 @@
+# This file is used internally by FFMPEG.
+file 'file:/Users/asri/Projects/AI-learning/media/videos/manim-test/1080p15/partial_movie_files/GANScene/203930182_3754120282_2358810818.mp4'
+file 'file:/Users/asri/Projects/AI-learning/media/videos/manim-test/1080p15/partial_movie_files/GANScene/539024040_1413788746_4236428642.mp4'
+file 'file:/Users/asri/Projects/AI-learning/media/videos/manim-test/1080p15/partial_movie_files/GANScene/539024040_2494444288_28662457.mp4'
+file 'file:/Users/asri/Projects/AI-learning/media/videos/manim-test/1080p15/partial_movie_files/GANScene/539024040_2577031956_3856070003.mp4'
+file 'file:/Users/asri/Projects/AI-learning/media/videos/manim-test/1080p15/partial_movie_files/GANScene/539024040_2781429491_4154707117.mp4'
+file 'file:/Users/asri/Projects/AI-learning/media/videos/manim-test/1080p15/partial_movie_files/GANScene/539024040_3778706137_875078553.mp4'
+file 'file:/Users/asri/Projects/AI-learning/media/videos/manim-test/1080p15/partial_movie_files/GANScene/539024040_3220900905_2355115176.mp4'

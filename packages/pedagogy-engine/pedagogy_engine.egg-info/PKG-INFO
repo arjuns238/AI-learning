@@ -1,0 +1,6 @@
+Metadata-Version: 2.1
+Name: pedagogy-engine
+Version: 0.1.0
+Summary: AI-powered pedagogical content generation system
+Requires-Python: >=3.9
+Provides-Extra: test

@@ -8,7 +8,7 @@ numpy>=1.24.0
 
 # API clients
 anthropic>=0.18.0
-openai>=1.0.0
+openai>=1.0.0  # Used for OpenAI and DeepSeek (OpenAI-compatible API)
 
 # Testing
 pytest>=7.4.0
@@ -17,3 +17,14 @@ pytest-cov>=4.1.0
 # Utilities
 python-dotenv>=1.0.0
 pyyaml>=6.0.0
+
+# Layer 4: Manim dataset validation
+datasets>=2.14.0
+manim>=0.18.0
+docker>=6.0.0
+
+#Hugging Face
+sentence-transformers>=5.2.0
+
+# Vector store
+chromadb>=1.4.1

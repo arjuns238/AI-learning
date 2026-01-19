@@ -1,0 +1,2 @@
+# This file is used internally by FFMPEG.
+file 'file:/Users/asri/Projects/AI-learning/media/videos/manim-test/1200p15/partial_movie_files/VAEScene/6283504_2085419102_2358810818.mp4'
