@@ -18,6 +18,13 @@ class PedagogicalPattern(ABC):
     Abstract base class for pedagogical patterns.
 
     Each pattern defines how to generate beats from a pedagogical intent.
+
+    Visual Design Principles:
+    - Use action verbs (Show, Animate, Demonstrate, Highlight, Transform)
+    - Prioritize dynamic representations over static states
+    - Consider both macro and micro level visualizations
+    - Ensure visual elements clarify complex concepts
+    - Match aesthetic to subject matter (e.g., 3Blue1Brown style for math/ML)
     """
 
     @abstractmethod
@@ -30,6 +37,12 @@ class PedagogicalPattern(ABC):
 
         Returns:
             List of Beat objects in pedagogical order
+
+        Beat Intent Guidelines:
+        - Start with action verbs (Show, Animate, Demonstrate, etc.)
+        - Focus on dynamic processes that can be animated
+        - Include both overview and detail perspectives
+        - Ensure logical flow from concept to concept
         """
         pass
 
@@ -129,6 +142,8 @@ class IterativeProcessPattern(PedagogicalPattern):
 
         For gradient descent: "the loss landscape being optimized"
         For EM algorithm: "the latent variable space being explored"
+
+        Uses action verbs to create dynamic visualization intent.
         """
         # Look for keywords related to spaces, landscapes, problems
         context_keywords = [
@@ -139,15 +154,15 @@ class IterativeProcessPattern(PedagogicalPattern):
         # Try to find a sentence with these keywords
         context_text = self._extract_keywords(mental_model, context_keywords)
 
-        # If we found a specific context, format it
+        # If we found a specific context, format it with action verb
         if any(kw in context_text.lower() for kw in context_keywords):
             # Extract the key noun phrase
             for keyword in ['landscape', 'surface', 'space', 'terrain']:
                 if keyword in context_text.lower():
-                    return f"Show the {keyword} being optimized."
+                    return f"Animate the {keyword} being optimized, showing its contours and structure."
 
-        # Fallback: generic context
-        return f"Show the problem space for {topic}."
+        # Fallback: generic context with dynamic verb
+        return f"Visualize the problem space for {topic} with clear boundaries and structure."
 
     def _extract_initial_state(self, concrete_anchor: str) -> str:
         """
@@ -155,19 +170,21 @@ class IterativeProcessPattern(PedagogicalPattern):
 
         For gradient descent: "starting parameter value"
         For EM: "initial cluster assignments"
+
+        Uses action verbs to create dynamic visualization intent.
         """
         # Look for keywords about starting, initial, random
         initial_keywords = ['start', 'initial', 'random', 'begin']
 
         initial_text = self._extract_keywords(concrete_anchor, initial_keywords)
 
-        # Try to extract what is being initialized
+        # Try to extract what is being initialized with action verb
         if 'weight' in concrete_anchor.lower() or 'parameter' in concrete_anchor.lower():
-            return "Indicate the starting parameter value."
+            return "Highlight the starting parameter value and place it on the landscape."
         elif 'point' in concrete_anchor.lower():
-            return "Indicate the starting point."
+            return "Highlight the starting point with clear visual emphasis."
         else:
-            return "Show the initial state of the system."
+            return "Demonstrate the initial state of the system with clear markers."
 
     def _extract_mechanism(self, mental_model: str, topic: str) -> str:
         """

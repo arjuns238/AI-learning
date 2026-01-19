@@ -32,7 +32,12 @@ class ManimPromptGenerator:
         system_instruction = (
             "Generate accurate and correct Manim Community Edition (ManimCE) "
             "Python code that produces the requested animation. "
-            "The output should be a complete, runnable Manim scene."
+            "The output should be a complete, runnable Manim scene.\n\n"
+            "TECHNICAL CONSTRAINTS:\n"
+            "- All elements must stay within screen aspect ratio: x-axis [-7.5, 7.5], y-axis [-4, 4]\n"
+            "- Plan proper spacing between elements to avoid overlap\n"
+            "- Use proper mathematical notation (both symbolic and descriptive forms)\n"
+            "- Ensure text and objects are clearly positioned and never overlapping"
         )
 
         user_prompt = self._build_user_prompt(storyboard)
@@ -41,7 +46,10 @@ class ManimPromptGenerator:
             "Use Manim Community Edition (ManimCE)",
             "Produce a single Scene class",
             "Ensure animations are smooth and pedagogically clear",
-            "Do not include explanations outside of code comments"
+            "Do not include explanations outside of code comments",
+            "All elements must fit within screen boundaries (x: -7.5 to 7.5, y: -4 to 4)",
+            "Maintain proper spacing to prevent overlapping objects or text",
+            "Format mathematical expressions with proper notation"
         ]
 
         metadata = ManimPromptMetadata(

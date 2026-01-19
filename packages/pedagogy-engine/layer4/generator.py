@@ -66,13 +66,32 @@ def detect_scene_name(code: str) -> Optional[str]:
 
 class ManimVectorStore:
     """
-    Vector store for ManimBench-v1 using Chroma.
+    Vector store for Manim datasets using Chroma.
+    Supports multiple datasets: ManimBench-v1, 3blue1brown-manim, and more.
     Stores embeddings persistently in the project data directory.
     """
 
     # Store vector database in project data directory
     VECTORSTORE_DIR = Path(__file__).parent.parent / "data" / "vectorstore"
-    COLLECTION_NAME = "manimdench-v1"
+    COLLECTION_NAME = "manim-combined"  # Combined collection for all datasets
+
+    # Dataset registry with metadata
+    DATASET_CONFIGS = {
+        "manimbench-v1": {
+            "hf_id": "SuienR/ManimBench-v1",
+            "description_cols": ["Reviewed Description", "Generated Description"],
+            "code_col": "Code",
+            "type_col": "Type",
+            "format": "parquet"
+        },
+        "3blue1brown-manim": {
+            "hf_id": "BibbyResearch/3blue1brown-manim",
+            "description_cols": ["prompt"],  # Confirmed column name
+            "code_col": ["output"],  # Confirmed column name
+            "type_col": ["type", "Type", "difficulty", "Difficulty"],
+            "format": "csv"
+        }
+    }
 
     def __init__(self):
         self.client = None
@@ -119,7 +138,16 @@ class ManimVectorStore:
             print(f"⚠️  Failed to initialize vector store: {e}")
             self._initialized = False
 
-    def _load_dataset_pandas(self) -> Optional['pd.DataFrame']:
+    def _find_column(self, df: 'pd.DataFrame', possible_names: list) -> Optional[str]:
+        """Find the first matching column name from a list of possibilities."""
+        if isinstance(possible_names, str):
+            possible_names = [possible_names]
+        for name in possible_names:
+            if name in df.columns:
+                return name
+        return None
+
+    def _load_manimbench_dataset(self) -> Optional['pd.DataFrame']:
         """
         Load ManimBench-v1 dataset using pandas from parquet format.
         Falls back to HuggingFace datasets if pandas fails.
@@ -135,7 +163,6 @@ class ManimVectorStore:
             print("Loading ManimBench-v1 dataset with pandas from HuggingFace...")
 
             # First, fetch the dataset info to get the correct split filename
-            from huggingface_hub import hf_hub_url
             import requests
 
             # Get dataset info
@@ -159,7 +186,8 @@ class ManimVectorStore:
             hf_path = f"hf://datasets/SuienR/ManimBench-v1/{train_file}"
             print(f"  Reading from: {hf_path}")
             df = pd.read_parquet(hf_path)
-            print(f"✓ Loaded {len(df)} examples via pandas")
+            df['_source'] = 'manimbench-v1'
+            print(f"✓ Loaded {len(df)} examples from ManimBench-v1")
             return df
 
         except Exception as e:
@@ -169,7 +197,8 @@ class ManimVectorStore:
             try:
                 print("Trying direct parquet path...")
                 df = pd.read_parquet("hf://datasets/SuienR/ManimBench-v1/data/train-00000-of-00001.parquet")
-                print(f"✓ Loaded {len(df)} examples via pandas")
+                df['_source'] = 'manimbench-v1'
+                print(f"✓ Loaded {len(df)} examples from ManimBench-v1")
                 return df
             except Exception as e2:
                 print(f"⚠️  Direct path also failed: {e2}")
@@ -180,7 +209,8 @@ class ManimVectorStore:
                 try:
                     dataset = load_dataset("SuienR/ManimBench-v1", split="train")
                     df = dataset.to_pandas()
-                    print(f"✓ Loaded {len(df)} examples via HuggingFace datasets")
+                    df['_source'] = 'manimbench-v1'
+                    print(f"✓ Loaded {len(df)} examples from ManimBench-v1")
                     return df
                 except Exception as e3:
                     print(f"⚠️  HuggingFace datasets also failed: {e3}")
@@ -189,12 +219,161 @@ class ManimVectorStore:
                 print("⚠️  datasets library not installed as fallback")
                 return None
 
-    def build(self, force_rebuild: bool = False):
+    def _load_3b1b_dataset(self) -> Optional['pd.DataFrame']:
         """
-        Build the vector store from ManimBench-v1 dataset using pandas.
+        Load 3blue1brown-manim dataset from HuggingFace.
+
+        This is a gated dataset requiring authentication:
+        1. Run: huggingface-cli login
+        2. Visit: https://huggingface.co/datasets/BibbyResearch/3blue1brown-manim
+        3. Accept the terms and conditions
+
+        Returns:
+            DataFrame with normalized columns for integration
+        """
+        if not HAS_PANDAS:
+            print("⚠️  pandas not installed. Install: pip install pandas")
+            return None
+
+        try:
+            print("Loading 3blue1brown-manim dataset from HuggingFace...")
+            print("  (Note: This is a gated dataset requiring authentication)")
+
+            # Try using HuggingFace datasets library first (more reliable for gated datasets)
+            if HAS_DATASETS:
+                try:
+                    dataset = load_dataset("BibbyResearch/3blue1brown-manim", split="train")
+                    df = dataset.to_pandas()
+                    df['_source'] = '3blue1brown-manim'
+                    print(f"✓ Loaded {len(df)} examples from 3blue1brown-manim via datasets library")
+                    print(f"  Columns: {list(df.columns)}")
+                    return df
+                except Exception as e:
+                    error_str = str(e).lower()
+                    if '401' in error_str or 'unauthorized' in error_str or 'gated' in error_str:
+                        print(f"⚠️  Authentication required for 3blue1brown-manim dataset")
+                        print(f"    To authenticate:")
+                        print(f"    1. Run: huggingface-cli login")
+                        print(f"    2. Visit: https://huggingface.co/datasets/BibbyResearch/3blue1brown-manim")
+                        print(f"    3. Accept the dataset terms and conditions")
+                        print(f"    4. Re-run this script")
+                        return None
+                    print(f"⚠️  datasets library failed: {e}")
+
+            # Try direct CSV loading (requires authentication token in headers)
+            try:
+                from huggingface_hub import hf_hub_download
+                print("  Trying via huggingface_hub...")
+                file_path = hf_hub_download(
+                    repo_id="BibbyResearch/3blue1brown-manim",
+                    filename="3blue1brown-manim-prompts.csv",
+                    repo_type="dataset"
+                )
+                df = pd.read_csv(file_path)
+                df['_source'] = '3blue1brown-manim'
+                print(f"✓ Loaded {len(df)} examples from 3blue1brown-manim")
+                print(f"  Columns: {list(df.columns)}")
+                return df
+            except Exception as e2:
+                error_str = str(e2).lower()
+                if '401' in error_str or 'unauthorized' in error_str or 'gated' in error_str:
+                    print(f"⚠️  Authentication required for 3blue1brown-manim dataset")
+                    print(f"    To authenticate:")
+                    print(f"    1. Run: huggingface-cli login")
+                    print(f"    2. Visit: https://huggingface.co/datasets/BibbyResearch/3blue1brown-manim")
+                    print(f"    3. Accept the dataset terms and conditions")
+                    print(f"    4. Re-run this script")
+                else:
+                    print(f"⚠️  huggingface_hub failed: {e2}")
+                return None
+
+        except Exception as e:
+            print(f"⚠️  Failed to load 3blue1brown-manim dataset: {e}")
+            return None
+
+    def _load_all_datasets(self) -> List['pd.DataFrame']:
+        """
+        Load all configured datasets and return as a list of DataFrames.
+        """
+        dataframes = []
+
+        # Load ManimBench-v1
+        df_manimbench = self._load_manimbench_dataset()
+        if df_manimbench is not None:
+            dataframes.append(df_manimbench)
+
+        # Load 3blue1brown-manim
+        df_3b1b = self._load_3b1b_dataset()
+        if df_3b1b is not None:
+            dataframes.append(df_3b1b)
+
+        return dataframes
+
+    def _normalize_dataframe(self, df: 'pd.DataFrame', source: str) -> List[dict]:
+        """
+        Normalize a DataFrame to a standard format for embedding.
+
+        Returns:
+            List of dicts with 'description', 'code', 'type', 'source' keys
+        """
+        normalized = []
+
+        # Define possible column names for each field (ordered by priority)
+        desc_cols = ['Reviewed Description', 'Generated Description', 'prompt', 'Prompt',
+                     'description', 'Description', 'instruction', 'Instruction']
+        code_cols = ['Code', 'code', 'output', 'Output', 'manim_code', 'Manim Code',
+                     'response', 'Response']
+        type_cols = ['Type', 'type', 'difficulty', 'Difficulty', 'level', 'Level']
+
+        # Find the actual column names
+        desc_col = self._find_column(df, desc_cols)
+        code_col = self._find_column(df, code_cols)
+        type_col = self._find_column(df, type_cols)
+
+        if not code_col:
+            print(f"⚠️  No code column found in {source}. Available columns: {list(df.columns)}")
+            return []
+
+        if not desc_col:
+            print(f"⚠️  No description column found in {source}. Will use code preview as description.")
+
+        print(f"  Using columns - Description: {desc_col}, Code: {code_col}, Type: {type_col}")
+
+        for _, row in df.iterrows():
+            # Get code
+            code = str(row[code_col]) if code_col and pd.notna(row[code_col]) else ""
+            if not code or code == 'nan':
+                continue
+
+            # Get description (fallback to code preview)
+            description = ""
+            if desc_col and pd.notna(row[desc_col]):
+                description = str(row[desc_col])
+            else:
+                description = code[:200] + "..." if len(code) > 200 else code
+
+            # Get type
+            type_ = "Unknown"
+            if type_col and pd.notna(row[type_col]):
+                type_ = str(row[type_col])
+
+            normalized.append({
+                'description': description,
+                'code': code,
+                'type': type_,
+                'source': source
+            })
+
+        return normalized
+
+    def build(self, force_rebuild: bool = False, datasets: List[str] = None):
+        """
+        Build the vector store from multiple Manim datasets.
 
         Args:
             force_rebuild: If True, delete and rebuild the collection
+            datasets: List of dataset names to include (default: all available)
+                     Options: 'manimbench-v1', '3blue1brown-manim'
         """
         if not self._initialized:
             print("⚠️  Vector store not initialized")
@@ -205,6 +384,7 @@ class ManimVectorStore:
             existing_count = self.collection.count()
             if existing_count > 0 and not force_rebuild:
                 print(f"✓ Vector store already populated with {existing_count} embeddings")
+                print("  Use force_rebuild=True to rebuild with new datasets")
                 return
 
             # Delete existing collection if force rebuild
@@ -216,35 +396,50 @@ class ManimVectorStore:
                     metadata={"hnsw:space": "cosine"}
                 )
 
-            # Load dataset using pandas
-            df = self._load_dataset_pandas()
-            if df is None:
-                print("⚠️  Failed to load dataset")
+            # Load all datasets
+            print("\n" + "="*60)
+            print("Loading datasets...")
+            print("="*60)
+
+            all_examples = []
+
+            # Load ManimBench-v1
+            if datasets is None or 'manimbench-v1' in datasets:
+                df_manimbench = self._load_manimbench_dataset()
+                if df_manimbench is not None:
+                    examples = self._normalize_dataframe(df_manimbench, 'manimbench-v1')
+                    all_examples.extend(examples)
+                    print(f"  → {len(examples)} examples from ManimBench-v1")
+
+            # Load 3blue1brown-manim
+            if datasets is None or '3blue1brown-manim' in datasets:
+                df_3b1b = self._load_3b1b_dataset()
+                if df_3b1b is not None:
+                    examples = self._normalize_dataframe(df_3b1b, '3blue1brown-manim')
+                    all_examples.extend(examples)
+                    print(f"  → {len(examples)} examples from 3blue1brown-manim")
+
+            if not all_examples:
+                print("⚠️  No examples loaded from any dataset")
                 return
+
+            print(f"\nTotal examples to embed: {len(all_examples)}")
+            print("="*60 + "\n")
 
             # Process in batches
             batch_size = 50
-            total_examples = len(df)
-            print(f"Computing embeddings and storing ({total_examples} total)...")
+            total_examples = len(all_examples)
+            print(f"Computing embeddings and storing...")
 
             for i in range(0, total_examples, batch_size):
-                batch_df = df.iloc[i : min(i + batch_size, total_examples)]
+                batch = all_examples[i : min(i + batch_size, total_examples)]
 
-                # Extract data from DataFrame
-                ids = [f"example_{j}" for j in range(i, i + len(batch_df))]
-
-                # Get descriptions (prefer Reviewed Description, fallback to Generated Description)
-                descriptions = []
-                for _, row in batch_df.iterrows():
-                    if 'Reviewed Description' in row and pd.notna(row['Reviewed Description']):
-                        descriptions.append(str(row['Reviewed Description']))
-                    elif 'Generated Description' in row and pd.notna(row['Generated Description']):
-                        descriptions.append(str(row['Generated Description']))
-                    else:
-                        descriptions.append("")
-
-                codes = [str(code) for code in batch_df['Code'].tolist()]
-                types = [str(t) if pd.notna(t) else "Unknown" for t in batch_df.get('Type', pd.Series(['Unknown'] * len(batch_df))).tolist()]
+                # Extract data from batch
+                ids = [f"{ex['source']}_{j}" for j, ex in enumerate(batch, start=i)]
+                descriptions = [ex['description'] for ex in batch]
+                codes = [ex['code'] for ex in batch]
+                types = [ex['type'] for ex in batch]
+                sources = [ex['source'] for ex in batch]
 
                 # Compute embeddings
                 embeddings = self.embedder.encode(descriptions).tolist()
@@ -254,9 +449,10 @@ class ManimVectorStore:
                     {
                         "description": desc,
                         "type": type_,
+                        "source": source,
                         "code_preview": code[:100] + "..." if len(code) > 100 else code
                     }
-                    for desc, type_, code in zip(descriptions, types, codes)
+                    for desc, type_, source, code in zip(descriptions, types, sources, codes)
                 ]
 
                 # Store in Chroma (documents for retrieval of full code)
@@ -269,7 +465,13 @@ class ManimVectorStore:
 
                 print(f"  Processed {min(i + batch_size, total_examples)}/{total_examples} examples")
 
-            print(f"✓ Vector store built successfully with {self.collection.count()} embeddings")
+            print(f"\n✓ Vector store built successfully with {self.collection.count()} embeddings")
+
+            # Print summary by source
+            print("\nDataset breakdown:")
+            for source in set(ex['source'] for ex in all_examples):
+                count = sum(1 for ex in all_examples if ex['source'] == source)
+                print(f"  - {source}: {count} examples")
 
         except Exception as e:
             print(f"⚠️  Failed to build vector store: {e}")
@@ -278,14 +480,14 @@ class ManimVectorStore:
 
     def retrieve(self, query: str, top_k: int = 3) -> List[dict]:
         """
-        Retrieve top-k similar examples.
-        
+        Retrieve top-k similar examples from all indexed datasets.
+
         Args:
             query: Query description or prompt
             top_k: Number of results to return
-            
+
         Returns:
-            List of dicts with 'description', 'code', 'type', 'similarity'
+            List of dicts with 'description', 'code', 'type', 'source', 'similarity'
         """
         if not self._initialized or self.collection is None:
             return []
@@ -311,6 +513,7 @@ class ManimVectorStore:
                         "description": metadata.get("description", ""),
                         "code": doc,
                         "type": metadata.get("type", "Unknown"),
+                        "source": metadata.get("source", "unknown"),
                         "similarity": float(similarity)
                     })
 
@@ -319,6 +522,18 @@ class ManimVectorStore:
         except Exception as e:
             print(f"⚠️  Error during retrieval: {e}")
             return []
+
+    def get_stats(self) -> dict:
+        """Get statistics about the vector store."""
+        if not self._initialized or self.collection is None:
+            return {"initialized": False, "count": 0}
+
+        return {
+            "initialized": True,
+            "count": self.collection.count(),
+            "collection_name": self.COLLECTION_NAME,
+            "storage_path": str(self.VECTORSTORE_DIR)
+        }
 
 
 # ---------- RAG Retriever ----------
@@ -490,7 +705,7 @@ class ManimCodeGenerator:
             query = user_prompt
 
             # Add pedagogical context to query if available
-            if metadata and 'pedagogical_context' in metadata:
+            if metadata and metadata.get('pedagogical_context'):
                 ped_ctx = metadata['pedagogical_context']
                 query_parts = [user_prompt]
 
@@ -518,6 +733,7 @@ class ManimCodeGenerator:
             print(f"{'='*60}")
             for i, example in enumerate(examples, 1):
                 print(f"\n[Example {i}]")
+                print(f"  Source: {example.get('source', 'unknown')}")
                 print(f"  Type: {example['type']}")
                 print(f"  Similarity: {example['similarity']:.3f}")
                 print(f"  Description: {example['description'][:150]}...")
@@ -525,10 +741,11 @@ class ManimCodeGenerator:
             print(f"{'='*60}\n")
 
             # Build few-shot examples section
-            examples_text = "\n\n## Similar Examples from ManimBench-v1:\n"
+            examples_text = "\n\n## Similar Examples from Manim Datasets:\n"
 
             for i, example in enumerate(examples, 1):
-                examples_text += f"\n### Example {i} (Type: {example['type']}, Similarity: {example['similarity']:.2f})\n"
+                source = example.get('source', 'unknown')
+                examples_text += f"\n### Example {i} (Source: {source}, Type: {example['type']}, Similarity: {example['similarity']:.2f})\n"
                 examples_text += f"Description: {example['description']}\n\n"
                 examples_text += f"Code:\n```python\n{example['code']}\n```\n"
 
@@ -677,6 +894,31 @@ CRITICAL OUTPUT RULES:
 - Do NOT use markdown or backticks.
 - Do NOT add explanations outside code comments.
 - The first non-empty line must be: from manim import *
+
+CODE STRUCTURE REQUIREMENTS:
+- Use modular design with separate functions for each key concept
+- Include clear comments explaining each step
+- Use a consistent style (3Blue1Brown approach) with appropriate colors, labels, and animations
+- Ensure the code is well-organized and readable
+
+ANIMATION BEST PRACTICES:
+- Implement clean transitions between scenes
+- Use self.play(FadeOut(*self.mobjects)) at the end of each major scene section
+- Add wait() calls after important animations for proper pacing (typically 1-2 seconds)
+- Make sure objects and text are NEVER overlapping at any point in the video
+- Ensure each scene section is properly cleaned up before transitioning to the next
+
+LAYOUT AND POSITIONING:
+- All elements must stay within screen boundaries (x: -7.5 to 7.5, y: -4 to 4)
+- Plan proper spacing between elements to avoid overlap
+- Use .next_to(), .shift(), .move_to() methods to position elements carefully
+- Test positioning to ensure no overlaps during animations
+
+VISUAL QUALITY:
+- Use clear, contrasting colors for different elements
+- Add appropriate labels and text annotations
+- Ensure smooth animation timing and transitions
+- Make visualizations intuitive and pedagogically effective
 """
 
         # Call the appropriate API based on provider

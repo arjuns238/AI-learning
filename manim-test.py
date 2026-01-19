@@ -1,140 +1,215 @@
+"""Autoencoder Manim Visualizations
+
+In this module I define Manim visualizations for Variational Autoencoders
+and Traditional Autoencoders.
+
+"""
+from pathlib import Path
+import random
 from manim import *
+import numpy as np
+from PIL import Image
+from manim_ml.neural_network.layers import EmbeddingLayer
+from manim_ml.neural_network.layers import FeedForwardLayer
+from manim_ml.neural_network.layers import ImageLayer
+from manim_ml.neural_network.layers.vector import VectorLayer
+from manim_ml.neural_network.neural_network import NeuralNetwork
+import torchvision.datasets as datasets
 
-class CantorDiagonalArgument(Scene):
-    def construct(self):
-        # Set background color to a deep blue
-        self.camera.background_color = "#0C1226"
 
-        # Title
-        title = Text("Cantor's Infinity Paradox", color=YELLOW).scale(1.2)
-        subtitle = Text("Breaking Down Infinite Sets", color="#66FF66").scale(0.8)
-        subtitle.next_to(title, DOWN)
+config.pixel_height = 1200
+config.pixel_width = 1900
+config.frame_height = 7.0
+config.frame_width = 7.0
 
-        self.play(Write(title))
-        self.play(Write(subtitle))
-        self.wait(1)
-        self.play(FadeOut(title), FadeOut(subtitle))
 
-        # Question about infinity
-        question = Text("Have you ever tried counting to infinity?", color=WHITE)
-        self.play(Write(question))
-        self.wait(1)
+def get_mnist_image():
+    """Download and return a sample MNIST digit image"""
+    mnist_data = datasets.MNIST(root='./data', train=True, download=True)
+    # Get first image and convert to numpy array
+    image, label = mnist_data[0]
+    return np.array(image)
 
-        # Brief visualization of counting
-        numbers = VGroup()
-        for i in range(1, 6):
-            num = Text(str(i), color=WHITE)
-            num.move_to([-4 + i*1.5, 0, 0])
-            numbers.add(num)
 
-        dots = Text("...", color=WHITE)
-        dots.next_to(numbers, RIGHT)
-        infinity = Text("∞", color=YELLOW)
-        infinity.next_to(dots, RIGHT)
+config.pixel_height = 1080
+config.pixel_width = 1080
+config.frame_height = 8.3
+config.frame_width = 8.3
 
-        self.play(FadeOut(question))
-        self.play(Write(numbers), Write(dots), Write(infinity))
-        self.wait(1)
 
-        # Statement about different sizes of infinity
-        statement = Text("Some infinities are larger than others", color=GREEN)
-        statement.to_edge(UP)
-        self.play(Write(statement))
-        self.wait(1)
+class GAN(Mobject):
+    """Generative Adversarial Network"""
 
-        # Clear the screen for the next part
-        self.play(FadeOut(numbers), FadeOut(dots), FadeOut(infinity), FadeOut(statement))
+    def __init__(self):
+        super().__init__()
+        self.make_entities()
+        self.place_entities()
+        self.titles = self.make_titles()
 
-        # Show mapping natural numbers to real numbers
-        mapping_title = Text("Mapping Natural Numbers to Real Numbers", color=YELLOW)
-        mapping_title.to_edge(UP)
-        self.play(Write(mapping_title))
-
-        # Formula for generating real numbers
-        formula = Text("a_n = n/10^n", color=WHITE)
-        formula.move_to([0, 2, 0])
-        self.play(Write(formula))
-        self.wait(1)
-
-        # Create a simple table showing the mapping
-        table_entries = [
-            ["n", "Real Number"],
-            ["1", "0.1"],
-            ["2", "0.02"],
-            ["3", "0.003"],
-            ["4", "0.0004"]
-        ]
-
-        table = VGroup()
-        for i, row in enumerate(table_entries):
-            for j, item in enumerate(row):
-                cell_text = Text(item, color=WHITE if i > 0 else YELLOW).scale(0.7)
-                cell_text.move_to([j*3 - 2, -i + 1, 0])
-                table.add(cell_text)
-
-        self.play(FadeOut(formula))
-        self.play(Write(table))
-        self.wait(1)
-
-        # Highlight the diagonal elements
-        diagonal_digits = ["1", "2", "3", "4"]  # The digits we'll extract from the diagonal
-        arrows = VGroup()
-
-        for i in range(1, 5):
-            arrow = Arrow(
-                start=[-2, -i + 1.3, 0],
-                end=[0, -i + 1, 0],
-                color=RED,
-                buff=0.1
-            ).scale(0.7)
-            arrows.add(arrow)
-
-        self.play(Create(arrows))
-
-        # Show the diagonal digits
-        diagonal_text = Text(f"Diagonal digits: {', '.join(diagonal_digits)}", color=RED).scale(0.7)
-        diagonal_text.to_edge(DOWN, buff=1.5)
-        self.play(Write(diagonal_text))
-        self.wait(1)
-
-        # Create a new number by modifying diagonal digits
-        new_formula = Text("b_i = a_i + 1", color=GREEN)
-        new_formula.next_to(diagonal_text, DOWN)
-        self.play(Write(new_formula))
-
-        # Calculate new digits by adding 1 to each diagonal digit
-        new_digits = []
-        for digit in diagonal_digits:
-            new_digit = str((int(digit) + 1) % 10)
-            new_digits.append(new_digit)
-
-        new_number = Text(f"New number: 0.{''.join(new_digits)}...", color=GREEN).scale(0.7)
-        new_number.next_to(new_formula, DOWN)
-        self.play(Write(new_number))
-        self.wait(1)
-
-        # Key insight
-        insight = Text("This new number differs from EVERY number in our list!", color=YELLOW).scale(0.7)
-        insight.to_edge(DOWN, buff=0.2)
-        self.play(Write(insight))
-        self.wait(1)
-
-        # Clear for conclusion
-        self.play(
-            FadeOut(table), FadeOut(arrows), FadeOut(diagonal_text),
-            FadeOut(new_formula), FadeOut(new_number), FadeOut(insight), FadeOut(mapping_title)
+    def make_entities(self, image_height=1.2):
+        """Makes all of the network entities"""
+        # Make the fake image layer
+        default_image = get_mnist_image()
+        numpy_image = np.asarray(default_image)
+        self.fake_image_layer = ImageLayer(
+            numpy_image, height=image_height, show_image_on_create=False
+        )
+        # Make the Generator Network
+        self.generator = NeuralNetwork(
+            [
+                EmbeddingLayer(covariance=np.array([[3.0, 0], [0, 3.0]])).scale(1.3),
+                FeedForwardLayer(3),
+                FeedForwardLayer(5),
+                self.fake_image_layer,
+            ],
+            layer_spacing=0.1,
         )
 
-        # Final conclusion
-        conclusion1 = Text("The set of real numbers between 0 and 1", color=WHITE).scale(0.8)
-        conclusion2 = Text("CANNOT be put in one-to-one correspondence", color=YELLOW).scale(0.8)
-        conclusion3 = Text("with the natural numbers", color=WHITE).scale(0.8)
+        self.add(self.generator)
+        # Make the Discriminator
+        self.discriminator = NeuralNetwork(
+            [
+                FeedForwardLayer(5),
+                FeedForwardLayer(1),
+                VectorLayer(1, value_func=lambda: random.uniform(0, 1)),
+            ],
+            layer_spacing=0.1,
+        )
+        self.add(self.discriminator)
+        # Make Ground Truth Dataset
+        default_image = get_mnist_image()
+        numpy_image = np.asarray(default_image)
+        print(numpy_image.shape)
+        self.ground_truth_layer = ImageLayer(numpy_image, height=image_height, show_image_on_create=False)
+        self.add(self.ground_truth_layer)
 
-        conclusion_group = VGroup(conclusion1, conclusion2, conclusion3).arrange(DOWN)
-        self.play(Write(conclusion_group))
-        self.wait(1)
+        self.scale(1)
 
-        final = Text("Not all infinities are equal!", color=GREEN).scale(1.2)
-        final.to_edge(DOWN, buff=1)
-        self.play(Write(final))
-        self.wait(2)
+    def place_entities(self):
+        """Positions entities in correct places"""
+        # Place relative to generator
+        # Place the ground_truth image layer
+        self.ground_truth_layer.next_to(self.fake_image_layer, DOWN, 0.8)
+        # Group the images
+        image_group = Group(self.ground_truth_layer, self.fake_image_layer)
+        # Move the discriminator to the right of thee generator
+        self.discriminator.next_to(self.generator, RIGHT, 0.2)
+        self.discriminator.match_y(image_group)
+        # Move the discriminator to the height of the center of the image_group
+        # self.discriminator.match_y(image_group)
+        # self.ground_truth_layer.next_to(self.fake_image_layer, DOWN, 0.5)
+
+    def make_titles(self):
+        """Makes titles for the different entities"""
+        titles = VGroup()
+
+        self.ground_truth_layer_title = Text("Real Image").scale(0.3)
+        self.ground_truth_layer_title.next_to(self.ground_truth_layer, UP, 0.1)
+        self.add(self.ground_truth_layer_title)
+        titles.add(self.ground_truth_layer_title)
+        self.fake_image_layer_title = Text("Fake Image").scale(0.3)
+        self.fake_image_layer_title.next_to(self.fake_image_layer, UP, 0.1)
+        self.add(self.fake_image_layer_title)
+        titles.add(self.fake_image_layer_title)
+        # Overhead title
+        overhead_title = Text("Generative Adversarial Network").scale(0.75)
+        overhead_title.shift(np.array([0, 3.5, 0]))
+        titles.add(overhead_title)
+        # Probability title
+        self.probability_title = Text("Probability").scale(0.5)
+        self.probability_title.move_to(self.discriminator.input_layers[-2])
+        self.probability_title.shift(UP)
+        self.probability_title.shift(RIGHT * 1.05)
+        titles.add(self.probability_title)
+
+        return titles
+
+    def make_highlight_generator_rectangle(self):
+        """Returns animation that highlights the generators contents"""
+        group = VGroup()
+
+        generator_surrounding_group = Group(self.generator, self.fake_image_layer_title)
+
+        generator_surrounding_rectangle = SurroundingRectangle(
+            generator_surrounding_group, buff=0.1, stroke_width=4.0, color="#0FFF50"
+        )
+        group.add(generator_surrounding_rectangle)
+        title = Text("Generator").scale(0.5)
+        title.next_to(generator_surrounding_rectangle, UP, 0.2)
+        group.add(title)
+
+        return group
+
+    def make_highlight_discriminator_rectangle(self):
+        """Makes a rectangle for highlighting the discriminator"""
+        discriminator_group = Group(
+            self.discriminator,
+            self.fake_image_layer,
+            self.ground_truth_layer,
+            self.fake_image_layer_title,
+            self.probability_title,
+        )
+
+        group = VGroup()
+
+        discriminator_surrounding_rectangle = SurroundingRectangle(
+            discriminator_group, buff=0.05, stroke_width=4.0, color="#0FFF50"
+        )
+        group.add(discriminator_surrounding_rectangle)
+        title = Text("Discriminator").scale(0.5)
+        title.next_to(discriminator_surrounding_rectangle, UP, 0.2)
+        group.add(title)
+
+        return group
+
+    def make_generator_forward_pass(self):
+        """Makes forward pass of the generator"""
+
+        forward_pass = self.generator.make_forward_pass_animation(dist_theme="ellipse")
+
+        return forward_pass
+
+    def make_discriminator_forward_pass(self):
+        """Makes forward pass of the discriminator"""
+
+        disc_forward = self.discriminator.make_forward_pass_animation()
+
+        return disc_forward
+
+    @override_animation(Create)
+    def _create_override(self):
+        """Overrides create"""
+        animation_group = AnimationGroup(
+            Create(self.generator),
+            Create(self.discriminator),
+            Create(self.ground_truth_layer),
+            Create(self.titles),
+        )
+        return animation_group
+
+
+class GANScene(Scene):
+    """GAN Scene"""
+
+    def construct(self):
+        gan = GAN().scale(1.70)
+        gan.move_to(ORIGIN)
+        gan.shift(DOWN * 0.35)
+        gan.shift(LEFT * 0.1)
+        self.play(Create(gan), run_time=3)
+        # Highlight generator
+        highlight_generator_rectangle = gan.make_highlight_generator_rectangle()
+        self.play(Create(highlight_generator_rectangle), run_time=1)
+        # Generator forward pass
+        gen_forward_pass = gan.make_generator_forward_pass()
+        self.play(gen_forward_pass, run_time=5)
+        # Fade out generator highlight
+        self.play(Uncreate(highlight_generator_rectangle), run_time=1)
+        # Highlight discriminator
+        highlight_discriminator_rectangle = gan.make_highlight_discriminator_rectangle()
+        self.play(Create(highlight_discriminator_rectangle), run_time=1)
+        # Discriminator forward pass
+        discriminator_forward_pass = gan.make_discriminator_forward_pass()
+        self.play(discriminator_forward_pass, run_time=5)
+        # Unhighlight discriminator
+        self.play(Uncreate(highlight_discriminator_rectangle), run_time=1)
