@@ -17,6 +17,10 @@ from layer1.schema import PedagogicalIntent, GenerationMetadata, PedagogicalInte
 # Load environment variables
 load_dotenv()
 
+# Get the pedagogy-engine root directory for resolving default paths
+_LAYER1_DIR = Path(__file__).parent
+_PEDAGOGY_ENGINE_ROOT = _LAYER1_DIR.parent
+
 
 class PedagogicalIntentGenerator:
     """Generates pedagogical intent from topics using LLM + exemplars."""
@@ -26,8 +30,8 @@ class PedagogicalIntentGenerator:
         model_name: Optional[str] = None,
         temperature: float = 0.7,
         api_provider: Optional[str] = None,
-        exemplar_path: str = "data/exemplars.json",
-        prompt_template_path: str = "prompts/pedagogical_intent.txt"
+        exemplar_path: Optional[str] = None,
+        prompt_template_path: Optional[str] = None
     ):
         # Determine API provider and model
         self.api_provider = api_provider or os.getenv("API_PROVIDER", "openai")
@@ -41,8 +45,23 @@ class PedagogicalIntentGenerator:
 
         self.model_name = model_name
         self.temperature = temperature
-        self.exemplar_path = exemplar_path
-        self.prompt_template_path = prompt_template_path
+
+        # Resolve paths - use absolute paths relative to package root if not provided
+        if exemplar_path is None:
+            self.exemplar_path = str(_PEDAGOGY_ENGINE_ROOT / "data" / "exemplars.json")
+        elif not Path(exemplar_path).is_absolute():
+            # If relative path provided, resolve relative to package root
+            self.exemplar_path = str(_PEDAGOGY_ENGINE_ROOT / exemplar_path)
+        else:
+            self.exemplar_path = exemplar_path
+
+        if prompt_template_path is None:
+            self.prompt_template_path = str(_PEDAGOGY_ENGINE_ROOT / "prompts" / "pedagogical_intent.txt")
+        elif not Path(prompt_template_path).is_absolute():
+            # If relative path provided, resolve relative to package root
+            self.prompt_template_path = str(_PEDAGOGY_ENGINE_ROOT / prompt_template_path)
+        else:
+            self.prompt_template_path = prompt_template_path
 
         # Initialize API client based on provider
         if self.api_provider == "openai":

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import Link from "next/link";
 
 import type { Lesson, LessonRequest } from "@/types/lesson";
 import { LessonRenderer } from "@/components/lesson/LessonRenderer";
@@ -76,6 +77,12 @@ export default function Home() {
               Type a topic once. Get a consistent intuition, a grounded example,
               a single visual, and a mini quiz to check your understanding.
             </p>
+            <Link
+              href="/learn"
+              className="inline-flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700"
+            >
+              Try the full video pipeline →
+            </Link>
           </div>
           <Card className="border-slate-200/60 bg-white/90">
             <CardHeader>
