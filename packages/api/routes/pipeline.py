@@ -3,13 +3,13 @@ Full Pipeline endpoints - Topic → Video + Pedagogical Metadata
 
 Provides synchronous and asynchronous endpoints for the complete
 Layer 1 → Layer 2 → Layer 3 → Layer 4 pipeline.
+
+Uses Supabase for persistent job storage and video hosting.
 """
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse
-from typing import Dict
+from fastapi.responses import RedirectResponse
 from pathlib import Path
-import asyncio
 from datetime import datetime
 import uuid
 
@@ -21,13 +21,9 @@ from orchestrator import (
     PipelineStage,
 )
 
-router = APIRouter()
+from supabase_client import JobStore, VideoStore
 
-# In-memory job storage (for async jobs)
-# In production, use Redis or a database
-active_jobs: Dict[str, PipelineProgress] = {}
-completed_jobs: Dict[str, FullPipelineResponse] = {}
-video_paths: Dict[str, str] = {}  # job_id -> video_path
+router = APIRouter()
 
 # Orchestrator instance (lazy init)
 _orchestrator = None
@@ -55,8 +51,22 @@ async def generate_full_pipeline(request: FullPipelineRequest):
     Returns:
         FullPipelineResponse with video URL + all pedagogical metadata
     """
+    job_id = str(uuid.uuid4())[:8]
+
     try:
+        # Create job in database
+        JobStore.create_job(job_id, request.topic)
+
         orch = get_orchestrator()
+
+        def progress_callback(progress: PipelineProgress):
+            JobStore.update_progress(
+                job_id,
+                stage=progress.stage.value,
+                progress_percent=progress.progress_percent,
+                message=progress.message,
+                error=progress.error
+            )
 
         # Run pipeline (blocking)
         result = orch.run(
@@ -64,15 +74,31 @@ async def generate_full_pipeline(request: FullPipelineRequest):
             domain=request.domain,
             difficulty_level=request.difficulty_level,
             include_generated_code=request.include_generated_code,
+            progress_callback=progress_callback,
         )
 
-        # Store video path for serving
+        # Upload video to Supabase Storage
+        video_url = None
         if result.video and result.video.video_path:
-            video_paths[result.job_id] = result.video.video_path
+            storage_path = VideoStore.upload_video(
+                job_id,
+                result.video.video_path,
+                request.topic
+            )
+            if storage_path:
+                video_url = f"/api/pipeline/video/{job_id}"
+                result.video.video_url = video_url
+
+        # Update job_id to match our generated one
+        result.job_id = job_id
+
+        # Mark job complete
+        JobStore.complete_job(job_id, result.model_dump(), video_url)
 
         return result
 
     except Exception as e:
+        JobStore.fail_job(job_id, str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -95,22 +121,22 @@ async def start_async_pipeline(
     """
     job_id = str(uuid.uuid4())[:8]
 
-    # Initialize progress
-    active_jobs[job_id] = PipelineProgress(
-        job_id=job_id,
-        stage=PipelineStage.PENDING,
-        progress_percent=0,
-        message="Job queued",
-        started_at=datetime.now().isoformat(),
-        updated_at=datetime.now().isoformat(),
-    )
-
-    def progress_callback(progress: PipelineProgress):
-        active_jobs[job_id] = progress
+    # Create job in database
+    JobStore.create_job(job_id, request.topic)
 
     def run_pipeline():
         try:
             orch = get_orchestrator()
+
+            def progress_callback(progress: PipelineProgress):
+                JobStore.update_progress(
+                    job_id,
+                    stage=progress.stage.value,
+                    progress_percent=progress.progress_percent,
+                    message=progress.message,
+                    error=progress.error
+                )
+
             result = orch.run(
                 topic=request.topic,
                 domain=request.domain,
@@ -119,28 +145,26 @@ async def start_async_pipeline(
                 progress_callback=progress_callback,
             )
 
-            # Store video path for serving (use route's job_id, not orchestrator's)
+            # Upload video to Supabase Storage
+            video_url = None
             if result.video and result.video.video_path:
-                video_paths[job_id] = result.video.video_path
+                storage_path = VideoStore.upload_video(
+                    job_id,
+                    result.video.video_path,
+                    request.topic
+                )
+                if storage_path:
+                    video_url = f"/api/pipeline/video/{job_id}"
+                    result.video.video_url = video_url
 
             # Override result's job_id to match the route's job_id
             result.job_id = job_id
-            completed_jobs[job_id] = result
+
+            # Mark job complete in database
+            JobStore.complete_job(job_id, result.model_dump(), video_url)
 
         except Exception as e:
-            # Mark as failed
-            active_jobs[job_id] = PipelineProgress(
-                job_id=job_id,
-                stage=PipelineStage.FAILED,
-                progress_percent=0,
-                message=f"Pipeline failed: {str(e)}",
-                started_at=active_jobs[job_id].started_at,
-                updated_at=datetime.now().isoformat(),
-                error=str(e),
-            )
-        finally:
-            # Clean up active job (keep for a bit for final status check)
-            pass
+            JobStore.fail_job(job_id, str(e))
 
     background_tasks.add_task(run_pipeline)
 
@@ -158,67 +182,82 @@ async def get_pipeline_status(job_id: str):
 
     Returns:
         - If completed: { "status": "completed", "result": FullPipelineResponse }
-        - If in progress: { "status": "in_progress", "progress": PipelineProgress }
+        - If in progress: { "status": "in_progress", "progress": {...} }
+        - If failed: { "status": "failed", "error": "..." }
         - If not found: 404 error
     """
-    # Check if completed
-    if job_id in completed_jobs:
-        result = completed_jobs[job_id]
+    job = JobStore.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    if job["status"] == "completed":
         return {
             "status": "completed",
-            "result": result.model_dump(),
+            "result": job["result"],
         }
 
-    # Check if in progress
-    if job_id in active_jobs:
-        progress = active_jobs[job_id]
-
-        # Check if failed
-        if progress.stage == PipelineStage.FAILED:
-            return {
-                "status": "failed",
-                "progress": progress.model_dump(),
-                "error": progress.error,
-            }
-
+    if job["status"] == "failed":
         return {
-            "status": "in_progress",
-            "progress": progress.model_dump(),
+            "status": "failed",
+            "progress": {
+                "job_id": job["job_id"],
+                "stage": job["stage"],
+                "progress_percent": job["progress_percent"],
+                "message": job["message"],
+            },
+            "error": job["error"],
         }
 
-    raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    # In progress or pending
+    return {
+        "status": "in_progress",
+        "progress": {
+            "job_id": job["job_id"],
+            "stage": job["stage"],
+            "progress_percent": job["progress_percent"],
+            "message": job["message"],
+            "started_at": job["created_at"],
+            "updated_at": job["updated_at"],
+        },
+    }
 
 
 @router.get("/video/{job_id}")
 async def get_video(job_id: str):
     """
-    Serve the generated video file.
+    Get a signed URL for the generated video.
 
-    Returns the video as a downloadable MP4 file.
+    Redirects to a time-limited signed URL from Supabase Storage.
     """
-    # Check completed jobs first
-    if job_id in completed_jobs:
-        result = completed_jobs[job_id]
-        if result.video and result.video.video_path:
-            video_path = Path(result.video.video_path)
-            if video_path.exists():
-                return FileResponse(
-                    video_path,
-                    media_type="video/mp4",
-                    filename=f"{result.topic.replace(' ', '_')}.mp4",
-                )
+    job = JobStore.get_job(job_id)
 
-    # Check video_paths cache
-    if job_id in video_paths:
-        video_path = Path(video_paths[job_id])
-        if video_path.exists():
-            return FileResponse(
-                video_path,
-                media_type="video/mp4",
-                filename=f"video_{job_id}.mp4",
-            )
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
 
-    raise HTTPException(status_code=404, detail="Video not found")
+    if job["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Job not completed yet")
+
+    # Get video path from result
+    result = job.get("result", {})
+    video_info = result.get("video", {})
+
+    if not video_info:
+        raise HTTPException(status_code=404, detail="No video in job result")
+
+    # Construct storage path
+    topic = job.get("topic", "video")
+    safe_topic = "".join(c if c.isalnum() or c in "-_" else "_" for c in topic)[:50]
+    storage_path = f"{job_id}/{safe_topic}.mp4"
+
+    # Get signed URL (valid for 1 hour)
+    signed_url = VideoStore.get_signed_url(storage_path, expires_in=3600)
+
+    if not signed_url:
+        raise HTTPException(status_code=404, detail="Video not found in storage")
+
+    # Redirect to the signed URL
+    return RedirectResponse(url=signed_url)
 
 
 @router.delete("/job/{job_id}")
@@ -226,38 +265,49 @@ async def delete_job(job_id: str):
     """
     Clean up a completed or failed job.
 
-    Removes the job from memory and optionally deletes the video file.
+    Removes the job from database and deletes the video from storage.
     """
-    deleted = False
+    job = JobStore.get_job(job_id)
 
-    if job_id in completed_jobs:
-        del completed_jobs[job_id]
-        deleted = True
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
-    if job_id in active_jobs:
-        del active_jobs[job_id]
-        deleted = True
+    # Delete video from storage if exists
+    topic = job.get("topic", "video")
+    safe_topic = "".join(c if c.isalnum() or c in "-_" else "_" for c in topic)[:50]
+    storage_path = f"{job_id}/{safe_topic}.mp4"
+    VideoStore.delete_video(storage_path)
 
-    if job_id in video_paths:
-        del video_paths[job_id]
-        deleted = True
+    # Delete from database
+    from supabase_client import get_client
+    get_client().table("pipeline_jobs").delete().eq("job_id", job_id).execute()
 
-    if deleted:
-        return {"status": "deleted", "job_id": job_id}
-
-    raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    return {"status": "deleted", "job_id": job_id}
 
 
 @router.get("/jobs")
-async def list_jobs():
+async def list_jobs(status: str = None, limit: int = 50):
     """
-    List all active and completed jobs.
+    List all jobs from database.
 
-    Useful for debugging and monitoring.
+    Query params:
+        - status: Filter by status (pending, in_progress, completed, failed)
+        - limit: Max number of jobs to return (default 50)
     """
+    jobs = JobStore.list_jobs(status=status, limit=limit)
+
     return {
-        "active_jobs": list(active_jobs.keys()),
-        "completed_jobs": list(completed_jobs.keys()),
-        "total_active": len(active_jobs),
-        "total_completed": len(completed_jobs),
+        "jobs": [
+            {
+                "job_id": j["job_id"],
+                "topic": j["topic"],
+                "status": j["status"],
+                "stage": j["stage"],
+                "progress_percent": j["progress_percent"],
+                "created_at": j["created_at"],
+                "updated_at": j["updated_at"],
+            }
+            for j in jobs
+        ],
+        "total": len(jobs),
     }

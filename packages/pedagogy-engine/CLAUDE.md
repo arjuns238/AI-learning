@@ -318,3 +318,5 @@ The only advantage of end-to-end (theoretical joint optimization) is impractical
 - Full modeling strategy: See approved plan in `.claude/plans/cryptic-painting-seahorse.md`
 - Pedagogical research: Concept inventories, learning progressions literature
 - Public datasets: Khan Academy, OpenStax, ASSISTments (use for pattern extraction, not copying)
+- Always use Context7 MCP when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
+- Implement basic authentication with Supabase. use library /supabase/supabase for API and docs.
