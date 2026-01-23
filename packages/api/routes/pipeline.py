@@ -21,7 +21,7 @@ from orchestrator import (
     PipelineStage,
 )
 
-from supabase_client import JobStore, VideoStore
+from supabase_client import JobStore, VideoStore, DebugJobStore
 
 router = APIRouter()
 
@@ -48,6 +48,8 @@ async def generate_full_pipeline(request: FullPipelineRequest):
     This endpoint blocks until the entire pipeline completes.
     For long-running operations, use /generate/async instead.
 
+    Debug data is automatically captured and can be retrieved via /debug/{job_id}
+
     Returns:
         FullPipelineResponse with video URL + all pedagogical metadata
     """
@@ -56,6 +58,9 @@ async def generate_full_pipeline(request: FullPipelineRequest):
     try:
         # Create job in database
         JobStore.create_job(job_id, request.topic)
+
+        # Create debug job to capture layer I/O
+        DebugJobStore.create_job(job_id, request.topic)
 
         orch = get_orchestrator()
 
@@ -68,6 +73,17 @@ async def generate_full_pipeline(request: FullPipelineRequest):
                 error=progress.error
             )
 
+        def debug_callback(layer_num: int, input_data: dict, output_data: dict, duration: float, error: str = None):
+            """Save layer I/O to debug_jobs table."""
+            DebugJobStore.update_layer(
+                job_id,
+                layer=layer_num,
+                input_data=input_data,
+                output_data=output_data,
+                duration_seconds=duration,
+                error=error
+            )
+
         # Run pipeline (blocking)
         result = orch.run(
             topic=request.topic,
@@ -75,6 +91,8 @@ async def generate_full_pipeline(request: FullPipelineRequest):
             difficulty_level=request.difficulty_level,
             include_generated_code=request.include_generated_code,
             progress_callback=progress_callback,
+            debug_callback=debug_callback,
+            external_job_id=job_id,
         )
 
         # Upload video to Supabase Storage
@@ -95,10 +113,18 @@ async def generate_full_pipeline(request: FullPipelineRequest):
         # Mark job complete
         JobStore.complete_job(job_id, result.model_dump(), video_url)
 
+        # Finalize debug job
+        DebugJobStore.complete_job(
+            job_id,
+            video_path=result.video.video_path if result.video else None,
+            total_duration=result.timing.total_seconds if result.timing else None
+        )
+
         return result
 
     except Exception as e:
         JobStore.fail_job(job_id, str(e))
+        DebugJobStore.fail_job(job_id, str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -111,6 +137,7 @@ async def start_async_pipeline(
     Start an asynchronous pipeline job.
 
     Returns immediately with job_id for polling progress.
+    Debug data is automatically captured and can be retrieved via /debug/{job_id}
 
     Example response:
         {
@@ -123,6 +150,9 @@ async def start_async_pipeline(
 
     # Create job in database
     JobStore.create_job(job_id, request.topic)
+
+    # Create debug job to capture layer I/O
+    DebugJobStore.create_job(job_id, request.topic)
 
     def run_pipeline():
         try:
@@ -137,12 +167,25 @@ async def start_async_pipeline(
                     error=progress.error
                 )
 
+            def debug_callback(layer_num: int, input_data: dict, output_data: dict, duration: float, error: str = None):
+                """Save layer I/O to debug_jobs table."""
+                DebugJobStore.update_layer(
+                    job_id,
+                    layer=layer_num,
+                    input_data=input_data,
+                    output_data=output_data,
+                    duration_seconds=duration,
+                    error=error
+                )
+
             result = orch.run(
                 topic=request.topic,
                 domain=request.domain,
                 difficulty_level=request.difficulty_level,
                 include_generated_code=request.include_generated_code,
                 progress_callback=progress_callback,
+                debug_callback=debug_callback,
+                external_job_id=job_id,
             )
 
             # Upload video to Supabase Storage
@@ -163,8 +206,16 @@ async def start_async_pipeline(
             # Mark job complete in database
             JobStore.complete_job(job_id, result.model_dump(), video_url)
 
+            # Finalize debug job
+            DebugJobStore.complete_job(
+                job_id,
+                video_path=result.video.video_path if result.video else None,
+                total_duration=result.timing.total_seconds if result.timing else None
+            )
+
         except Exception as e:
             JobStore.fail_job(job_id, str(e))
+            DebugJobStore.fail_job(job_id, str(e))
 
     background_tasks.add_task(run_pipeline)
 
@@ -306,6 +357,95 @@ async def list_jobs(status: str = None, limit: int = 50):
                 "progress_percent": j["progress_percent"],
                 "created_at": j["created_at"],
                 "updated_at": j["updated_at"],
+            }
+            for j in jobs
+        ],
+        "total": len(jobs),
+    }
+
+
+# =============================================================================
+# Debug Endpoints - Layer-by-layer inspection
+# =============================================================================
+
+@router.get("/debug/{job_id}")
+async def get_debug_job(job_id: str):
+    """
+    Get debug data for a job with all layer inputs/outputs.
+
+    Debug data is automatically captured when videos are generated.
+    Use this endpoint to inspect what each layer received and produced.
+
+    Returns:
+        - job_id, topic, status
+        - layers: dict with layer1-4, each containing input, output, duration, error
+    """
+    job = DebugJobStore.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Debug job {job_id} not found")
+
+    # Format response for readability
+    return {
+        "job_id": job["job_id"],
+        "topic": job["topic"],
+        "status": job["status"],
+        "created_at": job["created_at"],
+        "updated_at": job["updated_at"],
+        "total_duration_seconds": job.get("total_duration_seconds"),
+        "final_video_path": job.get("final_video_path"),
+        "layers": {
+            "layer1": {
+                "name": "Topic → Pedagogical Intent",
+                "input": job.get("layer1_input"),
+                "output": job.get("layer1_output"),
+                "duration_seconds": job.get("layer1_duration_seconds"),
+                "error": job.get("layer1_error"),
+            },
+            "layer2": {
+                "name": "Pedagogical Intent → Storyboard",
+                "input": job.get("layer2_input"),
+                "output": job.get("layer2_output"),
+                "duration_seconds": job.get("layer2_duration_seconds"),
+                "error": job.get("layer2_error"),
+            },
+            "layer3": {
+                "name": "Storyboard → Manim Prompt",
+                "input": job.get("layer3_input"),
+                "output": job.get("layer3_output"),
+                "duration_seconds": job.get("layer3_duration_seconds"),
+                "error": job.get("layer3_error"),
+            },
+            "layer4": {
+                "name": "Manim Prompt → Video",
+                "input": job.get("layer4_input"),
+                "output": job.get("layer4_output"),
+                "duration_seconds": job.get("layer4_duration_seconds"),
+                "error": job.get("layer4_error"),
+            },
+        },
+    }
+
+
+@router.get("/debug")
+async def list_debug_jobs(status: str = None, limit: int = 20):
+    """
+    List all debug jobs.
+
+    Query params:
+        - status: Filter by status (pending, in_progress, completed, failed)
+        - limit: Max number of jobs to return (default 20)
+    """
+    jobs = DebugJobStore.list_jobs(status=status, limit=limit)
+
+    return {
+        "jobs": [
+            {
+                "job_id": j["job_id"],
+                "topic": j["topic"],
+                "status": j["status"],
+                "total_duration_seconds": j.get("total_duration_seconds"),
+                "created_at": j["created_at"],
             }
             for j in jobs
         ],

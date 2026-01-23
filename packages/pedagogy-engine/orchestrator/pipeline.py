@@ -139,7 +139,9 @@ class FullPipelineOrchestrator:
         domain: Optional[str] = None,
         difficulty_level: Optional[int] = None,
         include_generated_code: bool = False,
-        progress_callback: Optional[Callable[[PipelineProgress], None]] = None
+        progress_callback: Optional[Callable[[PipelineProgress], None]] = None,
+        debug_callback: Optional[Callable[[int, dict, dict, float, Optional[str]], None]] = None,
+        external_job_id: Optional[str] = None
     ) -> FullPipelineResponse:
         """
         Execute the full pipeline from topic to video.
@@ -150,11 +152,14 @@ class FullPipelineOrchestrator:
             difficulty_level: Optional difficulty (1-5)
             include_generated_code: Whether to include Manim code in response
             progress_callback: Optional callback for progress updates
+            debug_callback: Optional callback for layer I/O debugging.
+                            Called with (layer_num, input_data, output_data, duration, error)
+            external_job_id: Optional job_id to use (for coordination with API routes)
 
         Returns:
             FullPipelineResponse with all outputs and metadata
         """
-        job_id = str(uuid.uuid4())[:8]
+        job_id = external_job_id or str(uuid.uuid4())[:8]
         started_at = datetime.now()
         timings = LayerTimings()
 
@@ -180,6 +185,9 @@ class FullPipelineOrchestrator:
                 )
                 progress_callback(progress)
 
+        # Layer 1 input for debug
+        layer1_input = {"topic": topic, "domain": domain, "difficulty_level": difficulty_level}
+
         try:
             # === Layer 1: Topic → Pedagogical Intent ===
             update_progress(PipelineStage.LAYER1_INTENT, 10, "Generating pedagogical intent...")
@@ -195,14 +203,22 @@ class FullPipelineOrchestrator:
             update_progress(PipelineStage.LAYER1_INTENT, 25, "Pedagogical intent generated")
             print(f"✓ Layer 1 complete: {timings.layer1:.1f}s")
 
+            # Debug callback
+            if debug_callback:
+                debug_callback(1, layer1_input, pedagogical_intent.model_dump(), timings.layer1, None)
+
         except Exception as e:
             error_stage = PipelineStage.LAYER1_INTENT.value
             error_message = f"Layer 1 failed: {str(e)}"
             update_progress(PipelineStage.FAILED, 10, error_message, str(e))
             print(f"✗ Layer 1 failed: {e}")
+            if debug_callback:
+                debug_callback(1, layer1_input, None, 0, str(e))
 
         # Continue to Layer 2 if Layer 1 succeeded
         if pedagogical_intent:
+            layer2_input = {"pedagogical_intent": pedagogical_intent.intent.model_dump()}
+
             try:
                 # === Layer 2: Pedagogical Intent → Storyboard ===
                 update_progress(PipelineStage.LAYER2_STORYBOARD, 30, "Generating storyboard...")
@@ -216,14 +232,21 @@ class FullPipelineOrchestrator:
                 update_progress(PipelineStage.LAYER2_STORYBOARD, 45, "Storyboard generated")
                 print(f"✓ Layer 2 complete: {timings.layer2:.1f}s")
 
+                if debug_callback:
+                    debug_callback(2, layer2_input, storyboard.model_dump(), timings.layer2, None)
+
             except Exception as e:
                 error_stage = PipelineStage.LAYER2_STORYBOARD.value
                 error_message = f"Layer 2 failed: {str(e)}"
                 update_progress(PipelineStage.FAILED, 30, error_message, str(e))
                 print(f"✗ Layer 2 failed: {e}")
+                if debug_callback:
+                    debug_callback(2, layer2_input, None, 0, str(e))
 
         # Continue to Layer 3 if Layer 2 succeeded
         if storyboard:
+            layer3_input = {"storyboard": storyboard.model_dump()}
+
             try:
                 # === Layer 3: Storyboard → Manim Prompt ===
                 update_progress(PipelineStage.LAYER3_PROMPT, 50, "Generating Manim prompt...")
@@ -244,14 +267,21 @@ class FullPipelineOrchestrator:
                 update_progress(PipelineStage.LAYER3_PROMPT, 55, "Manim prompt generated")
                 print(f"✓ Layer 3 complete: {timings.layer3:.1f}s")
 
+                if debug_callback:
+                    debug_callback(3, layer3_input, manim_prompt.model_dump(), timings.layer3, None)
+
             except Exception as e:
                 error_stage = PipelineStage.LAYER3_PROMPT.value
                 error_message = f"Layer 3 failed: {str(e)}"
                 update_progress(PipelineStage.FAILED, 50, error_message, str(e))
                 print(f"✗ Layer 3 failed: {e}")
+                if debug_callback:
+                    debug_callback(3, layer3_input, None, 0, str(e))
 
         # Continue to Layer 4 if Layer 3 succeeded
         if manim_prompt:
+            layer4_input = {"manim_prompt": manim_prompt.model_dump()}
+
             try:
                 # === Layer 4: Manim Prompt → Video ===
                 update_progress(PipelineStage.LAYER4_VIDEO, 60, "Generating and rendering video...")
@@ -263,17 +293,23 @@ class FullPipelineOrchestrator:
                 if execution.execution_result.success:
                     update_progress(PipelineStage.COMPLETED, 100, "Video generated successfully")
                     print(f"✓ Layer 4 complete: {timings.layer4:.1f}s")
+                    if debug_callback:
+                        debug_callback(4, layer4_input, execution.model_dump(), timings.layer4, None)
                 else:
                     error_stage = PipelineStage.LAYER4_VIDEO.value
                     error_message = f"Video generation failed: {execution.execution_result.error_message}"
                     update_progress(PipelineStage.FAILED, 90, error_message)
                     print(f"✗ Layer 4 failed: {execution.execution_result.error_message}")
+                    if debug_callback:
+                        debug_callback(4, layer4_input, execution.model_dump(), timings.layer4, execution.execution_result.error_message)
 
             except Exception as e:
                 error_stage = PipelineStage.LAYER4_VIDEO.value
                 error_message = f"Layer 4 failed: {str(e)}"
                 update_progress(PipelineStage.FAILED, 60, error_message, str(e))
                 print(f"✗ Layer 4 failed: {e}")
+                if debug_callback:
+                    debug_callback(4, layer4_input, None, 0, str(e))
 
         # Build response
         completed_at = datetime.now()

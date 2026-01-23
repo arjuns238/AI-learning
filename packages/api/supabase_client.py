@@ -128,6 +128,96 @@ class JobStore:
         return result.data or []
 
 
+class DebugJobStore:
+    """Supabase-backed debug job storage for layer-by-layer inspection."""
+
+    TABLE = "debug_jobs"
+
+    @staticmethod
+    def create_job(job_id: str, topic: str) -> dict:
+        """Create a new debug job record."""
+        client = get_client()
+        data = {
+            "job_id": job_id,
+            "topic": topic,
+            "status": "pending",
+        }
+        result = client.table(DebugJobStore.TABLE).insert(data).execute()
+        return result.data[0] if result.data else data
+
+    @staticmethod
+    def update_layer(
+        job_id: str,
+        layer: int,
+        input_data: Optional[dict] = None,
+        output_data: Optional[dict] = None,
+        duration_seconds: Optional[float] = None,
+        error: Optional[str] = None
+    ) -> dict:
+        """Update a specific layer's input/output data."""
+        client = get_client()
+        data = {"status": "in_progress"}
+
+        if input_data is not None:
+            data[f"layer{layer}_input"] = input_data
+        if output_data is not None:
+            data[f"layer{layer}_output"] = output_data
+        if duration_seconds is not None:
+            data[f"layer{layer}_duration_seconds"] = duration_seconds
+        if error is not None:
+            data[f"layer{layer}_error"] = error
+            data["status"] = "failed"
+
+        result = client.table(DebugJobStore.TABLE).update(data).eq("job_id", job_id).execute()
+        return result.data[0] if result.data else {}
+
+    @staticmethod
+    def complete_job(
+        job_id: str,
+        video_path: Optional[str] = None,
+        total_duration: Optional[float] = None
+    ) -> dict:
+        """Mark debug job as completed."""
+        client = get_client()
+        data = {
+            "status": "completed",
+        }
+        if video_path:
+            data["final_video_path"] = video_path
+        if total_duration:
+            data["total_duration_seconds"] = total_duration
+
+        result = client.table(DebugJobStore.TABLE).update(data).eq("job_id", job_id).execute()
+        return result.data[0] if result.data else {}
+
+    @staticmethod
+    def fail_job(job_id: str, error: str) -> dict:
+        """Mark debug job as failed."""
+        client = get_client()
+        data = {
+            "status": "failed",
+        }
+        result = client.table(DebugJobStore.TABLE).update(data).eq("job_id", job_id).execute()
+        return result.data[0] if result.data else {}
+
+    @staticmethod
+    def get_job(job_id: str) -> Optional[dict]:
+        """Get debug job by ID with all layer data."""
+        client = get_client()
+        result = client.table(DebugJobStore.TABLE).select("*").eq("job_id", job_id).execute()
+        return result.data[0] if result.data else None
+
+    @staticmethod
+    def list_jobs(status: Optional[str] = None, limit: int = 20) -> list:
+        """List debug jobs."""
+        client = get_client()
+        query = client.table(DebugJobStore.TABLE).select("*").order("created_at", desc=True).limit(limit)
+        if status:
+            query = query.eq("status", status)
+        result = query.execute()
+        return result.data or []
+
+
 class VideoStore:
     """Supabase Storage for videos."""
 
