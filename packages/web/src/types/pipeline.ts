@@ -105,3 +105,69 @@ export type JobStatusResponse =
       progress: PipelineProgress;
       error: string;
     };
+
+// ============================================
+// Enhanced Quiz Types (Phase 1)
+// ============================================
+
+export type QuizOption = {
+  text: string;
+  is_correct: boolean;
+  misconception_hint?: string; // Shown when this wrong answer is selected
+};
+
+export type QuizQuestion = {
+  id: string;
+  question: string;
+  options: QuizOption[];
+  explanation: string; // Shown after correct answer
+  related_beat_index?: number; // Links to storyboard beat
+};
+
+export type EnhancedQuiz = {
+  questions: QuizQuestion[];
+  passing_score?: number; // Min correct to "pass"
+};
+
+// ============================================
+// Q&A Types (Phase 1)
+// ============================================
+
+export type QAMessage = {
+  role: "user" | "assistant";
+  content: string;
+  followups?: string[];
+};
+
+export type QARequest = {
+  lesson_id: string;
+  question: string;
+};
+
+export type QAResponse = {
+  answer: string;
+  suggested_followups: string[];
+  related_section?: string;
+};
+
+// ============================================
+// Content Section Types (Phase 1)
+// ============================================
+
+export type ContentSection = {
+  section_id: string;
+  beat_index: number;
+  title: string;
+  content_markdown: string;
+  key_takeaway?: string;
+  // In Phase 2, this will have animation_clip
+};
+
+export type LessonContent = {
+  topic: string;
+  introduction: string;
+  sections: ContentSection[];
+  summary: string;
+  quiz: EnhancedQuiz;
+  explore_deeper_prompts: string[];
+};
