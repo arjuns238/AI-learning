@@ -1,0 +1,29 @@
+Create a short (15-20 second) educational animation for the following concept.
+
+## Topic Context
+**Topic:** {TOPIC}
+**Core Mental Model:** {TARGET_MENTAL_MODEL}
+
+## Visual to Create
+**Concept:** {CONCEPT}
+**What to animate:** {DESCRIPTION}
+**Pedagogical Purpose:** {PEDAGOGICAL_PURPOSE}
+**Target Duration:** {DURATION_HINT} seconds
+
+## Animation Requirements
+
+1. **Focus**: This animation should visualize ONLY the specific concept described above, not the entire topic
+2. **Clarity**: Visual elements should be simple, clear, and easy to follow
+3. **Pacing**: Animation should be smooth and give viewers time to understand each step
+4. **Labels**: Include minimal on-screen text to label key elements (not paragraphs of explanation)
+5. **Duration**: Keep the animation to approximately {DURATION_HINT} seconds
+
+## Technical Constraints
+- Use Manim Community Edition (ManimCE)
+- Produce a single Scene class
+- All elements must fit within screen boundaries (x: -7.5 to 7.5, y: -4 to 4)
+- Maintain proper spacing to prevent overlapping objects or text
+- Use proper mathematical notation where applicable
+- Ensure animations are smooth and pedagogically clear
+
+The animation should be self-contained and complement text-based explanations.

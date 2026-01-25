@@ -3,6 +3,8 @@ Layer 3 Generator: Storyboard → Manim Prompt
 
 Compiles a storyboard into a single high-quality ManimCE
 code generation prompt.
+
+Also supports generating focused prompts for individual visual opportunities.
 """
 
 import json
@@ -17,6 +19,12 @@ from layer3.schema import (
     ManimPromptMetadata,
     ManimPromptWithMetadata
 )
+from layer1.schema import PedagogicalIntent
+from visual_planner.schema import VisualOpportunity
+
+# Resolve paths
+_LAYER3_DIR = Path(__file__).parent
+_PEDAGOGY_ENGINE_ROOT = _LAYER3_DIR.parent
 
 
 class ManimPromptGenerator:
@@ -86,6 +94,79 @@ class ManimPromptGenerator:
         lines.append("Conclude the animation by reinforcing the main takeaway of the concept.")
 
         return "\n".join(lines)
+
+    # ---------- Visual Opportunity Methods ----------
+
+    def generate_for_visual(
+        self,
+        opportunity: VisualOpportunity,
+        intent: PedagogicalIntent
+    ) -> ManimPromptWithMetadata:
+        """
+        Generate a focused Manim prompt for a specific visual opportunity.
+
+        Args:
+            opportunity: The visual opportunity from the Visual Planner
+            intent: The pedagogical intent for context
+
+        Returns:
+            ManimPromptWithMetadata for this specific visual
+        """
+        # Load prompt template
+        template_path = _PEDAGOGY_ENGINE_ROOT / "prompts" / "visual_manim_prompt.txt"
+        with open(template_path, 'r') as f:
+            template = f.read()
+
+        # Fill in template
+        user_prompt = template
+        user_prompt = user_prompt.replace("{TOPIC}", intent.topic)
+        user_prompt = user_prompt.replace("{TARGET_MENTAL_MODEL}", intent.target_mental_model)
+        user_prompt = user_prompt.replace("{CONCEPT}", opportunity.concept)
+        user_prompt = user_prompt.replace("{DESCRIPTION}", opportunity.description)
+        user_prompt = user_prompt.replace("{PEDAGOGICAL_PURPOSE}", opportunity.pedagogical_purpose)
+        user_prompt = user_prompt.replace("{DURATION_HINT}", str(opportunity.duration_hint))
+
+        title = f"Visual: {opportunity.concept} ({intent.topic})"
+
+        system_instruction = (
+            "Generate accurate and correct Manim Community Edition (ManimCE) "
+            "Python code that produces the requested animation. "
+            "The output should be a complete, runnable Manim scene.\n\n"
+            "IMPORTANT: This is a SHORT, FOCUSED animation (15-20 seconds) for a single concept.\n"
+            "Keep it simple and clear. Do not try to explain the entire topic.\n\n"
+            "TECHNICAL CONSTRAINTS:\n"
+            "- All elements must stay within screen aspect ratio: x-axis [-7.5, 7.5], y-axis [-4, 4]\n"
+            "- Plan proper spacing between elements to avoid overlap\n"
+            "- Use proper mathematical notation where applicable\n"
+            "- Ensure text and objects are clearly positioned and never overlapping"
+        )
+
+        constraints = [
+            "Use Manim Community Edition (ManimCE)",
+            "Produce a single Scene class",
+            "Keep animation to approximately 15-20 seconds",
+            "Focus ONLY on the specific concept described",
+            "Ensure animations are smooth and pedagogically clear",
+            "All elements must fit within screen boundaries (x: -7.5 to 7.5, y: -4 to 4)",
+            "Use minimal on-screen text (labels, not paragraphs)",
+        ]
+
+        metadata = ManimPromptMetadata(
+            source_storyboard_topic=intent.topic,
+            pedagogical_pattern=None,
+            generation_timestamp=datetime.now().isoformat(),
+            source_layer2_id=opportunity.id
+        )
+
+        return ManimPromptWithMetadata(
+            prompt=ManimPrompt(
+                title=title,
+                system_instruction=system_instruction,
+                user_prompt=user_prompt,
+                constraints=constraints
+            ),
+            metadata=metadata
+        )
 
     # ---------- Layer 2 style helpers ----------
 

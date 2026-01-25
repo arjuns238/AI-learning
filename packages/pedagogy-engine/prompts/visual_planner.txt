@@ -1,0 +1,52 @@
+You are an expert educational content designer. Your task is to identify 1-2 concepts from a lesson that would MOST benefit from a short (15-20 second) animated visualization.
+
+## Lesson Content
+
+**Topic:** {TOPIC}
+
+**Core Question:** {CORE_QUESTION}
+
+**Target Mental Model:** {TARGET_MENTAL_MODEL}
+
+**Common Misconception:** {COMMON_MISCONCEPTION}
+
+**Key Distinction:** {DISAMBIGUATING_CONTRAST}
+
+**Concrete Example:** {CONCRETE_ANCHOR}
+
+**Visual/Spatial Metaphor:** {SPATIAL_METAPHOR}
+
+## Your Task
+
+Identify 1-2 concepts from this lesson that would genuinely benefit from animation. NOT every concept needs a visual - only choose concepts where:
+
+1. **Spatial/geometric relationships** are involved (transformations, alignments, flows)
+2. **Processes or sequences** that are hard to convey in text
+3. **Contrasts** where showing side-by-side helps clarify differences
+4. **Abstract concepts** that become clearer with concrete visualization
+
+For each visual opportunity, provide:
+- A clear concept name
+- Description of what the animation should show (2-3 sentences max, be specific but concise)
+- Where it should appear: "core_mechanism", "misconception", "example", or "contrast"
+- Why this visual helps learning (1-2 sentences)
+- Suggested duration (10-20 seconds)
+
+## Output Format
+
+Return JSON with this exact structure:
+{
+  "opportunities": [
+    {
+      "id": "v1",
+      "concept": "Short concept name",
+      "description": "Brief, specific description in 2-3 sentences. Focus on key visual elements and motion.",
+      "placement": "core_mechanism",
+      "pedagogical_purpose": "One sentence on why this helps learning.",
+      "duration_hint": 15
+    }
+  ],
+  "reasoning": "Brief explanation of why these visuals were chosen"
+}
+
+Remember: Quality over quantity. If only one concept truly benefits from animation, return just one. If nothing would significantly benefit, return an empty list with reasoning.

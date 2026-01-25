@@ -14,8 +14,10 @@ class PipelineStage(str, Enum):
     PENDING = "pending"
     LAYER1_INTENT = "generating_pedagogical_intent"
     LAYER2_STORYBOARD = "generating_storyboard"
+    VISUAL_PLANNING = "identifying_visual_opportunities"
     LAYER3_PROMPT = "generating_manim_prompt"
     LAYER4_VIDEO = "generating_video"
+    GENERATING_CLIPS = "generating_animation_clips"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -69,6 +71,18 @@ class VideoMetadata(BaseModel):
     generated_code: Optional[str] = None
 
 
+class AnimationClipSummary(BaseModel):
+    """Summary of a generated animation clip for API response."""
+    clip_id: str
+    concept: str
+    placement: str  # core_mechanism, misconception, example, contrast
+    video_url: Optional[str] = None
+    video_path: Optional[str] = None
+    duration_seconds: float = 0.0
+    success: bool = False
+    error_message: Optional[str] = None
+
+
 class TimingBreakdown(BaseModel):
     """Timing breakdown by layer."""
     total_seconds: float
@@ -76,6 +90,8 @@ class TimingBreakdown(BaseModel):
     layer2_seconds: float = 0.0
     layer3_seconds: float = 0.0
     layer4_seconds: float = 0.0
+    visual_planning_seconds: float = 0.0
+    clip_generation_seconds: float = 0.0
 
 
 class FullPipelineResponse(BaseModel):
@@ -95,6 +111,12 @@ class FullPipelineResponse(BaseModel):
     pedagogy: Optional[PedagogicalMetadata] = None
     storyboard: Optional[StoryboardSummary] = None
 
+    # Animation clips (Phase 2 - multiple short clips)
+    clips: List[AnimationClipSummary] = Field(
+        default_factory=list,
+        description="Short animation clips for specific concepts"
+    )
+
     # Timing
     started_at: str
     completed_at: str
@@ -103,7 +125,7 @@ class FullPipelineResponse(BaseModel):
 
 class FullPipelineRequest(BaseModel):
     """Request body for full pipeline endpoint."""
-    topic: str = Field(..., min_length=3, max_length=200)
+    topic: str = Field(..., min_length=3)
     domain: Optional[str] = None
     difficulty_level: Optional[int] = Field(None, ge=1, le=5)
 

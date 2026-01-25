@@ -31,6 +31,12 @@ interface DebugJobDetail {
   updated_at: string;
   total_duration_seconds: number | null;
   final_video_path: string | null;
+  visual_planning: {
+    duration_seconds: number;
+    error: string | null;
+    plan: Record<string, unknown> | null;
+    clips: Array<Record<string, unknown>> | null;
+  } | null;
   layers: {
     layer1: LayerData;
     layer2: LayerData;
@@ -46,6 +52,7 @@ export default function DebugPage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedLayers, setExpandedLayers] = useState<Set<string>>(new Set());
+  const [expandedVisualPlanning, setExpandedVisualPlanning] = useState(false);
 
   // Fetch jobs list on mount
   useEffect(() => {
@@ -80,6 +87,7 @@ export default function DebugPage() {
       const data = await response.json();
       setSelectedJob(data);
       setExpandedLayers(new Set()); // Reset expanded state
+      setExpandedVisualPlanning(false); // Reset visual planning expansion
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch job detail");
     } finally {
@@ -259,8 +267,159 @@ export default function DebugPage() {
                   </CardContent>
                 </Card>
 
-                {/* Layers */}
-                {Object.entries(selectedJob.layers).map(([key, layer]) => (
+                {/* Layer 1 */}
+                {selectedJob.layers.layer1 && (() => {
+                  const layer = selectedJob.layers.layer1;
+                  const key = "layer1";
+                  return (
+                    <Card>
+                      <CardHeader
+                        className="cursor-pointer"
+                        onClick={() => toggleLayer(key)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
+                                layer.error
+                                  ? "bg-red-100 text-red-700"
+                                  : layer.output
+                                  ? "bg-green-100 text-green-700"
+                                  : "bg-slate-100 text-slate-500"
+                              }`}
+                            >
+                              1
+                            </div>
+                            <div>
+                              <CardTitle className="text-base">{layer.name}</CardTitle>
+                              <p className="text-xs text-slate-500">
+                                {formatDuration(layer.duration_seconds)}
+                                {layer.error && " • Failed"}
+                              </p>
+                            </div>
+                          </div>
+                          <span className="text-slate-400">
+                            {expandedLayers.has(key) ? "▼" : "▶"}
+                          </span>
+                        </div>
+                      </CardHeader>
+
+                      {expandedLayers.has(key) && (
+                        <CardContent className="space-y-4 border-t pt-4">
+                          {layer.error && (
+                            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                              <strong>Error:</strong> {layer.error}
+                            </div>
+                          )}
+
+                          <div>
+                            <h4 className="mb-2 text-sm font-medium text-slate-700">
+                              Input
+                            </h4>
+                            <pre className="max-h-64 overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-all rounded-lg bg-slate-100 p-3 text-xs">
+                              {layer.input
+                                ? JSON.stringify(layer.input, null, 2)
+                                : "No input data"}
+                            </pre>
+                          </div>
+
+                          <div>
+                            <h4 className="mb-2 text-sm font-medium text-slate-700">
+                              Output
+                            </h4>
+                            <pre className="max-h-96 overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-all rounded-lg bg-slate-100 p-3 text-xs">
+                              {layer.output
+                                ? JSON.stringify(layer.output, null, 2)
+                                : "No output data"}
+                            </pre>
+                          </div>
+                        </CardContent>
+                      )}
+                    </Card>
+                  );
+                })()}
+
+                {/* Visual Planning */}
+                {selectedJob?.visual_planning && (
+                  <Card>
+                    <CardHeader
+                      className="cursor-pointer"
+                      onClick={() => setExpandedVisualPlanning(!expandedVisualPlanning)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
+                              selectedJob.visual_planning.error
+                                ? "bg-red-100 text-red-700"
+                                : selectedJob.visual_planning.clips
+                                ? "bg-green-100 text-green-700"
+                                : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            VP
+                          </div>
+                          <div>
+                            <CardTitle className="text-base">Visual Planning</CardTitle>
+                            <p className="text-xs text-slate-500">
+                              {formatDuration(selectedJob.visual_planning.duration_seconds)}
+                              {selectedJob.visual_planning.error && " • Failed"}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-slate-400">
+                          {expandedVisualPlanning ? "▼" : "▶"}
+                        </span>
+                      </div>
+                    </CardHeader>
+                    {expandedVisualPlanning && (
+                      <CardContent className="space-y-4 border-t pt-4">
+                        {selectedJob.visual_planning.error && (
+                          <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">
+                            <strong>Error:</strong> {selectedJob.visual_planning.error}
+                          </div>
+                        )}
+
+                        {/* Plan Summary */}
+                        {selectedJob.visual_planning.plan && (
+                          <div className="space-y-2">
+                            <h4 className="font-semibold text-sm">Plan</h4>
+                            <pre className="bg-slate-100 p-3 rounded text-xs overflow-auto max-h-40 break-words whitespace-pre-wrap word-break-break-word">
+                              {JSON.stringify(selectedJob.visual_planning.plan, null, 2)}
+                            </pre>
+                          </div>
+                        )}
+
+                        {/* Clips */}
+                        {selectedJob.visual_planning.clips && selectedJob.visual_planning.clips.length > 0 && (
+                          <div className="space-y-2">
+                            <h4 className="font-semibold text-sm">
+                              Generated Clips ({selectedJob.visual_planning.clips.length})
+                            </h4>
+                            <div className="space-y-2">
+                              {selectedJob.visual_planning.clips.map((clip: any, idx: number) => (
+                                <div key={idx} className="border border-slate-200 rounded p-2 text-xs">
+                                  <div className="font-semibold text-slate-700">{clip.clip_id}</div>
+                                  <div className="text-slate-600 mt-1">
+                                    Status: {clip.success ? "✓ Success" : "✗ Failed"}
+                                  </div>
+                                  {clip.error && (
+                                    <div className="text-red-600 mt-1">{clip.error}</div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    )}
+                  </Card>
+                )}
+
+                {/* Layers 3 and 4 */}
+                {(["layer3", "layer4"] as const).map((key) => {
+                  const layer = selectedJob.layers[key];
+                  return (
                   <Card key={key}>
                     <CardHeader
                       className="cursor-pointer"
@@ -305,7 +464,7 @@ export default function DebugPage() {
                           <h4 className="mb-2 text-sm font-medium text-slate-700">
                             Input
                           </h4>
-                          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-100 p-3 text-xs">
+                          <pre className="max-h-64 overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-all rounded-lg bg-slate-100 p-3 text-xs">
                             {layer.input
                               ? JSON.stringify(layer.input, null, 2)
                               : "No input data"}
@@ -316,7 +475,7 @@ export default function DebugPage() {
                           <h4 className="mb-2 text-sm font-medium text-slate-700">
                             Output
                           </h4>
-                          <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-100 p-3 text-xs">
+                          <pre className="max-h-96 overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-all rounded-lg bg-slate-100 p-3 text-xs">
                             {layer.output
                               ? JSON.stringify(layer.output, null, 2)
                               : "No output data"}
@@ -325,7 +484,8 @@ export default function DebugPage() {
                       </CardContent>
                     )}
                   </Card>
-                ))}
+                  );
+                })}
               </>
             )}
           </div>

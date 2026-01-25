@@ -172,10 +172,35 @@ class DebugJobStore:
         return result.data[0] if result.data else {}
 
     @staticmethod
+    def update_visual_planning(
+        job_id: str,
+        visual_plan: Optional[dict] = None,
+        clips: Optional[list] = None,
+        duration_seconds: Optional[float] = None,
+        error: Optional[str] = None
+    ) -> dict:
+        """Update visual planning data."""
+        client = get_client()
+        data = {"status": "in_progress"}
+
+        if visual_plan is not None:
+            data["visual_plan"] = visual_plan
+        if clips is not None:
+            data["clips"] = clips
+        if duration_seconds is not None:
+            data["visual_planning_duration_seconds"] = duration_seconds
+        if error is not None:
+            data["visual_planning_error"] = error
+
+        result = client.table(DebugJobStore.TABLE).update(data).eq("job_id", job_id).execute()
+        return result.data[0] if result.data else {}
+
+    @staticmethod
     def complete_job(
         job_id: str,
         video_path: Optional[str] = None,
-        total_duration: Optional[float] = None
+        total_duration: Optional[float] = None,
+        clips: Optional[list] = None
     ) -> dict:
         """Mark debug job as completed."""
         client = get_client()
@@ -186,6 +211,8 @@ class DebugJobStore:
             data["final_video_path"] = video_path
         if total_duration:
             data["total_duration_seconds"] = total_duration
+        if clips:
+            data["clips"] = clips
 
         result = client.table(DebugJobStore.TABLE).update(data).eq("job_id", job_id).execute()
         return result.data[0] if result.data else {}
@@ -251,6 +278,39 @@ class VideoStore:
         )
 
         return storage_path
+
+    @staticmethod
+    def upload_clip(job_id: str, clip_id: str, video_path: str) -> Optional[str]:
+        """
+        Upload an animation clip to Supabase Storage.
+
+        Returns the storage path (not a URL).
+        """
+        client = get_client()
+        path = Path(video_path)
+
+        if not path.exists():
+            print(f"Clip file not found: {video_path}")
+            return None
+
+        # Store clips in a subdirectory
+        storage_path = f"{job_id}/clips/{clip_id}.mp4"
+
+        with open(path, "rb") as f:
+            video_bytes = f.read()
+
+        # Upload to storage
+        try:
+            client.storage.from_(VideoStore.BUCKET).upload(
+                storage_path,
+                video_bytes,
+                file_options={"content-type": "video/mp4"}
+            )
+            print(f"Uploaded clip to: {storage_path}")
+            return storage_path
+        except Exception as e:
+            print(f"Failed to upload clip: {e}")
+            return None
 
     @staticmethod
     def get_signed_url(storage_path: str, expires_in: int = 3600) -> Optional[str]:

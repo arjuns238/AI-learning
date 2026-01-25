@@ -20,15 +20,13 @@ class Beat(BaseModel):
     purpose: str = Field(
         ...,
         description="The pedagogical purpose of this beat (e.g., 'set_context', 'show_update_rule')",
-        min_length=3,
-        max_length=100
+        min_length=3
     )
 
     intent: str = Field(
         ...,
         description="What this beat should accomplish pedagogically",
-        min_length=10,
-        max_length=500
+        min_length=10
     )
 
 
@@ -40,8 +38,7 @@ class Storyboard(BaseModel):
     topic: str = Field(
         ...,
         description="The topic being taught",
-        min_length=3,
-        max_length=200
+        min_length=3
     )
 
     beats: List[Beat] = Field(

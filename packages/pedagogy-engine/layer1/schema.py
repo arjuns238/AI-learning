@@ -20,56 +20,49 @@ class PedagogicalIntent(BaseModel):
     topic: str = Field(
         ...,
         description="The topic being taught",
-        min_length=3,
-        max_length=200
+        min_length=3
     )
 
     core_question: str = Field(
         ...,
         description="The fundamental question the learner is trying to answer. "
                     "Should capture actual learner confusion, not textbook definition.",
-        min_length=10,
-        max_length=800
+        min_length=10
     )
 
     target_mental_model: str = Field(
         ...,
         description="The conceptual framework the learner should build. "
                     "Should be a clear, specific mental model.",
-        min_length=20,
-        max_length=1000
+        min_length=20
     )
 
     common_misconception: str = Field(
         ...,
         description="A typical wrong understanding that learners hold. "
                     "Should be common (not obscure) and specific.",
-        min_length=10,
-        max_length=800
+        min_length=10
     )
 
     disambiguating_contrast: str = Field(
         ...,
         description="A comparison that clarifies the concept by highlighting "
                     "a key difference. Should compare two distinct concepts.",
-        min_length=10,
-        max_length=800
+        min_length=10
     )
 
     concrete_anchor: str = Field(
         ...,
         description="A specific, grounded example that makes the concept tangible. "
                     "Should be manipulable/visualizable and relatable.",
-        min_length=10,
-        max_length=800
+        min_length=10
     )
 
     check_for_understanding: str = Field(
         ...,
         description="A question to verify the learner has grasped the concept. "
                     "Should test understanding, not rote memorization.",
-        min_length=10,
-        max_length=800
+        min_length=10
     )
 
     # Optional metadata
@@ -90,24 +83,6 @@ class PedagogicalIntent(BaseModel):
         description="Optional hint for visualization (forward compatibility with Layer 2/3)"
     )
 
-    @field_validator('core_question', 'check_for_understanding')
-    @classmethod
-    def must_be_question(cls, v: str, info) -> str:
-        """Ensure question fields actually contain questions."""
-        v = v.strip()
-        if not (v.endswith('?') or 'how' in v.lower() or 'why' in v.lower() or 'what' in v.lower()):
-            raise ValueError(f"{info.field_name} should be phrased as a question")
-        return v
-
-    @field_validator('common_misconception')
-    @classmethod
-    def check_specificity(cls, v: str) -> str:
-        """Check that misconception is specific enough."""
-        v = v.strip()
-        generic_phrases = ['some people think', 'often confused', 'many believe']
-        if any(phrase in v.lower() for phrase in generic_phrases) and len(v) < 50:
-            raise ValueError("Misconception is too generic. Be more specific about the actual wrong belief.")
-        return v
 
     def model_dump_json_formatted(self) -> str:
         """Return pretty-printed JSON representation."""

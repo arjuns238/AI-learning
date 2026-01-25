@@ -16,7 +16,43 @@ import {
   ContextualQABox,
   ExploreDeeper,
 } from "@/components/lesson";
-import type { EnhancedQuiz, QuizQuestion, QuizOption } from "@/types/pipeline";
+import type { EnhancedQuiz, QuizQuestion, QuizOption, AnimationClipSummary, ClipPlacement } from "@/types/pipeline";
+
+const API_BASE = "http://localhost:8000";
+
+// Helper to find a clip by placement
+function getClipByPlacement(
+  clips: AnimationClipSummary[] | undefined,
+  placement: ClipPlacement
+): AnimationClipSummary | undefined {
+  return clips?.find((c) => c.placement === placement && c.success);
+}
+
+// Inline clip player component - displays as looping GIF-like video
+function ClipPlayer({ clip, jobId, className = "" }: { clip: AnimationClipSummary; jobId: string; className?: string }) {
+  const baseUrl = clip.video_url || `/api/pipeline/video/clip/${jobId}/${clip.clip_id}`;
+  const videoUrl = baseUrl.startsWith("http") ? baseUrl : `${API_BASE}${baseUrl}`;
+
+  return (
+    <div className={`rounded-lg overflow-hidden border border-slate-200 ${className}`}>
+      <video
+        src={videoUrl}
+        autoPlay
+        loop
+        muted
+        playsInline
+        className="w-full max-h-[300px] bg-slate-900"
+        preload="metadata"
+      >
+        Your browser does not support video playback.
+      </video>
+      <div className="px-3 py-2 bg-slate-50 text-xs text-slate-500 flex justify-between">
+        <span>{clip.concept}</span>
+        <span>{clip.duration_seconds.toFixed(1)}s</span>
+      </div>
+    </div>
+  );
+}
 
 export default function Home() {
   const { isLoading, progress, result, error, generate, reset } = usePipeline();
@@ -193,7 +229,18 @@ export default function Home() {
                     <span>L2 (Story): {result.timing.layer2_seconds.toFixed(1)}s</span>
                     <span>L3 (Prompt): {result.timing.layer3_seconds.toFixed(1)}s</span>
                     <span>L4 (Video): {result.timing.layer4_seconds.toFixed(1)}s</span>
+                    {result.timing.visual_planning_seconds !== undefined && result.timing.visual_planning_seconds > 0 && (
+                      <span>Visual Plan: {result.timing.visual_planning_seconds.toFixed(1)}s</span>
+                    )}
+                    {result.timing.clip_generation_seconds !== undefined && result.timing.clip_generation_seconds > 0 && (
+                      <span>Clips: {result.timing.clip_generation_seconds.toFixed(1)}s</span>
+                    )}
                   </div>
+                  {result.clips && result.clips.length > 0 && (
+                    <p className="pt-2 text-xs text-slate-500">
+                      {result.clips.filter(c => c.success).length}/{result.clips.length} clips generated
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -281,6 +328,14 @@ export default function Home() {
                           </p>
                         </div>
                       )}
+                      {/* Core mechanism animation clip */}
+                      {getClipByPlacement(result.clips, "core_mechanism") && (
+                        <ClipPlayer
+                          clip={getClipByPlacement(result.clips, "core_mechanism")!}
+                          jobId={result.job_id}
+                          className="mt-4"
+                        />
+                      )}
                     </CardContent>
                   </Card>
                 )}
@@ -329,6 +384,18 @@ export default function Home() {
                       <p className="text-sm text-amber-700">
                         <strong>The key distinction:</strong> {result.pedagogy.disambiguating_contrast}
                       </p>
+                      {/* Misconception or contrast animation clip */}
+                      {(getClipByPlacement(result.clips, "misconception") ||
+                        getClipByPlacement(result.clips, "contrast")) && (
+                        <ClipPlayer
+                          clip={
+                            getClipByPlacement(result.clips, "misconception") ||
+                            getClipByPlacement(result.clips, "contrast")!
+                          }
+                          jobId={result.job_id}
+                          className="mt-4"
+                        />
+                      )}
                     </CardContent>
                   </Card>
                 )}
@@ -342,10 +409,18 @@ export default function Home() {
                         Concrete Example
                       </CardTitle>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="space-y-3">
                       <p className="text-emerald-900">
                         {result.pedagogy.concrete_anchor}
                       </p>
+                      {/* Example animation clip */}
+                      {getClipByPlacement(result.clips, "example") && (
+                        <ClipPlayer
+                          clip={getClipByPlacement(result.clips, "example")!}
+                          jobId={result.job_id}
+                          className="mt-4"
+                        />
+                      )}
                     </CardContent>
                   </Card>
                 )}

@@ -47,6 +47,10 @@ export function VideoPlayer({ video, jobId }: VideoPlayerProps) {
             ref={videoRef}
             className="aspect-video w-full"
             controls
+            autoPlay
+            loop
+            muted
+            playsInline
             onPlay={() => setIsPlaying(true)}
             onPause={() => setIsPlaying(false)}
             onError={handleError}

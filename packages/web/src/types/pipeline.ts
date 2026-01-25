@@ -6,8 +6,10 @@ export type PipelineStage =
   | "pending"
   | "generating_pedagogical_intent"
   | "generating_storyboard"
+  | "identifying_visual_opportunities"
   | "generating_manim_prompt"
   | "generating_video"
+  | "generating_animation_clips"
   | "completed"
   | "failed";
 
@@ -53,12 +55,35 @@ export type VideoMetadata = {
   generated_code?: string;
 };
 
+// ============================================
+// Animation Clips (Phase 2)
+// ============================================
+
+export type ClipPlacement =
+  | "core_mechanism"
+  | "misconception"
+  | "example"
+  | "contrast";
+
+export type AnimationClipSummary = {
+  clip_id: string;
+  concept: string;
+  placement: ClipPlacement;
+  video_url?: string;
+  video_path?: string;
+  duration_seconds: number;
+  success: boolean;
+  error_message?: string;
+};
+
 export type TimingBreakdown = {
   total_seconds: number;
   layer1_seconds: number;
   layer2_seconds: number;
   layer3_seconds: number;
   layer4_seconds: number;
+  visual_planning_seconds?: number;
+  clip_generation_seconds?: number;
 };
 
 export type FullPipelineResponse = {
@@ -70,6 +95,7 @@ export type FullPipelineResponse = {
   video?: VideoMetadata;
   pedagogy?: PedagogicalMetadata;
   storyboard?: StoryboardSummary;
+  clips?: AnimationClipSummary[];
   started_at: string;
   completed_at: string;
   timing?: TimingBreakdown;
@@ -160,7 +186,7 @@ export type ContentSection = {
   title: string;
   content_markdown: string;
   key_takeaway?: string;
-  // In Phase 2, this will have animation_clip
+  animation_clip?: AnimationClipSummary;
 };
 
 export type LessonContent = {
