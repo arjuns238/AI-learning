@@ -1,7 +1,10 @@
 """
 Orchestrator module for end-to-end pipeline execution.
 
-Chains all 4 layers: Topic → Pedagogical Intent → Storyboard → Manim Prompt → Video
+New Architecture (section-based):
+- Layer 1: Topic → Pedagogical Intent with freeform sections + embedded visual hints
+- Layer 3: Visual sections → Manim prompts
+- Layer 4: Manim prompts → Videos
 """
 
 from .pipeline import FullPipelineOrchestrator
@@ -11,9 +14,11 @@ from .schema import (
     FullPipelineRequest,
     FullPipelineResponse,
     PedagogicalMetadata,
-    StoryboardSummary,
-    StoryboardBeat,
+    PedagogicalSectionSummary,
+    VisualHintSummary,
+    ComparisonSummary,
     VideoMetadata,
+    AnimationClipSummary,
     TimingBreakdown,
 )
 
@@ -24,8 +29,10 @@ __all__ = [
     "FullPipelineRequest",
     "FullPipelineResponse",
     "PedagogicalMetadata",
-    "StoryboardSummary",
-    "StoryboardBeat",
+    "PedagogicalSectionSummary",
+    "VisualHintSummary",
+    "ComparisonSummary",
     "VideoMetadata",
+    "AnimationClipSummary",
     "TimingBreakdown",
 ]

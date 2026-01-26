@@ -1,12 +1,15 @@
 /**
  * TypeScript types for the Full Pipeline API
+ *
+ * New Architecture (section-based):
+ * - Layer 1: Topic -> Pedagogical Intent with freeform sections + embedded visual hints
+ * - Layer 3: Visual sections -> Manim prompts
+ * - Layer 4: Manim prompts -> Videos
  */
 
 export type PipelineStage =
   | "pending"
   | "generating_pedagogical_intent"
-  | "generating_storyboard"
-  | "identifying_visual_opportunities"
   | "generating_manim_prompt"
   | "generating_video"
   | "generating_animation_clips"
@@ -23,28 +26,38 @@ export type PipelineProgress = {
   error?: string;
 };
 
+// ============================================
+// Section-based Pedagogical Schema
+// ============================================
+
+export type VisualHint = {
+  should_animate: boolean;
+  animation_description?: string;
+  duration_hint?: number;
+};
+
+export type Comparison = {
+  item_a: string;
+  item_b: string;
+  difference: string;
+};
+
+export type PedagogicalSection = {
+  title: string;
+  content: string;
+  order: number;
+  visual?: VisualHint;
+  steps?: string[];
+  math_expressions?: string[];
+  comparison?: Comparison;
+};
+
 export type PedagogicalMetadata = {
   topic: string;
-  core_question: string;
-  target_mental_model: string;
-  common_misconception: string;
-  disambiguating_contrast: string;
-  concrete_anchor: string;
-  check_for_understanding: string;
+  summary: string;
+  sections: PedagogicalSection[];
   domain?: string;
   difficulty_level?: number;
-  spatial_metaphor?: string;
-};
-
-export type StoryboardBeat = {
-  purpose: string;
-  intent: string;
-};
-
-export type StoryboardSummary = {
-  topic: string;
-  pedagogical_pattern?: string;
-  beats: StoryboardBeat[];
 };
 
 export type VideoMetadata = {
@@ -56,19 +69,13 @@ export type VideoMetadata = {
 };
 
 // ============================================
-// Animation Clips (Phase 2)
+// Animation Clips (linked to sections)
 // ============================================
-
-export type ClipPlacement =
-  | "core_mechanism"
-  | "misconception"
-  | "example"
-  | "contrast";
 
 export type AnimationClipSummary = {
   clip_id: string;
-  concept: string;
-  placement: ClipPlacement;
+  section_order: number;
+  section_title: string;
   video_url?: string;
   video_path?: string;
   duration_seconds: number;
@@ -79,10 +86,8 @@ export type AnimationClipSummary = {
 export type TimingBreakdown = {
   total_seconds: number;
   layer1_seconds: number;
-  layer2_seconds: number;
   layer3_seconds: number;
   layer4_seconds: number;
-  visual_planning_seconds?: number;
   clip_generation_seconds?: number;
 };
 
@@ -94,7 +99,6 @@ export type FullPipelineResponse = {
   error_message?: string;
   video?: VideoMetadata;
   pedagogy?: PedagogicalMetadata;
-  storyboard?: StoryboardSummary;
   clips?: AnimationClipSummary[];
   started_at: string;
   completed_at: string;
@@ -133,7 +137,7 @@ export type JobStatusResponse =
     };
 
 // ============================================
-// Enhanced Quiz Types (Phase 1)
+// Enhanced Quiz Types
 // ============================================
 
 export type QuizOption = {
@@ -147,7 +151,7 @@ export type QuizQuestion = {
   question: string;
   options: QuizOption[];
   explanation: string; // Shown after correct answer
-  related_beat_index?: number; // Links to storyboard beat
+  related_section_order?: number; // Links to section
 };
 
 export type EnhancedQuiz = {
@@ -156,7 +160,7 @@ export type EnhancedQuiz = {
 };
 
 // ============================================
-// Q&A Types (Phase 1)
+// Q&A Types
 // ============================================
 
 export type QAMessage = {
@@ -177,23 +181,24 @@ export type QAResponse = {
 };
 
 // ============================================
-// Content Section Types (Phase 1)
+// Content Section Types (for rendering)
 // ============================================
 
 export type ContentSection = {
   section_id: string;
-  beat_index: number;
+  order: number;
   title: string;
   content_markdown: string;
-  key_takeaway?: string;
+  steps?: string[];
+  math_expressions?: string[];
+  comparison?: Comparison;
   animation_clip?: AnimationClipSummary;
 };
 
 export type LessonContent = {
   topic: string;
-  introduction: string;
-  sections: ContentSection[];
   summary: string;
-  quiz: EnhancedQuiz;
-  explore_deeper_prompts: string[];
+  sections: ContentSection[];
+  quiz?: EnhancedQuiz;
+  explore_deeper_prompts?: string[];
 };

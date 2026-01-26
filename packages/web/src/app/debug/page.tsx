@@ -31,15 +31,14 @@ interface DebugJobDetail {
   updated_at: string;
   total_duration_seconds: number | null;
   final_video_path: string | null;
-  visual_planning: {
+  // Visual sections and clips (from Layer 1)
+  visual_sections?: {
     duration_seconds: number;
     error: string | null;
-    plan: Record<string, unknown> | null;
     clips: Array<Record<string, unknown>> | null;
   } | null;
   layers: {
     layer1: LayerData;
-    layer2: LayerData;
     layer3: LayerData;
     layer4: LayerData;
   };
@@ -339,8 +338,8 @@ export default function DebugPage() {
                   );
                 })()}
 
-                {/* Visual Planning */}
-                {selectedJob?.visual_planning && (
+                {/* Visual Sections (clips from Layer 1 visual hints) */}
+                {selectedJob?.visual_sections && (
                   <Card>
                     <CardHeader
                       className="cursor-pointer"
@@ -350,20 +349,20 @@ export default function DebugPage() {
                         <div className="flex items-center gap-3">
                           <div
                             className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
-                              selectedJob.visual_planning.error
+                              selectedJob.visual_sections.error
                                 ? "bg-red-100 text-red-700"
-                                : selectedJob.visual_planning.clips
+                                : selectedJob.visual_sections.clips
                                 ? "bg-green-100 text-green-700"
                                 : "bg-slate-100 text-slate-500"
                             }`}
                           >
-                            VP
+                            VS
                           </div>
                           <div>
-                            <CardTitle className="text-base">Visual Planning</CardTitle>
+                            <CardTitle className="text-base">Visual Sections</CardTitle>
                             <p className="text-xs text-slate-500">
-                              {formatDuration(selectedJob.visual_planning.duration_seconds)}
-                              {selectedJob.visual_planning.error && " • Failed"}
+                              {formatDuration(selectedJob.visual_sections.duration_seconds)}
+                              {selectedJob.visual_sections.error && " • Failed"}
                             </p>
                           </div>
                         </div>
@@ -374,37 +373,27 @@ export default function DebugPage() {
                     </CardHeader>
                     {expandedVisualPlanning && (
                       <CardContent className="space-y-4 border-t pt-4">
-                        {selectedJob.visual_planning.error && (
+                        {selectedJob.visual_sections.error && (
                           <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">
-                            <strong>Error:</strong> {selectedJob.visual_planning.error}
-                          </div>
-                        )}
-
-                        {/* Plan Summary */}
-                        {selectedJob.visual_planning.plan && (
-                          <div className="space-y-2">
-                            <h4 className="font-semibold text-sm">Plan</h4>
-                            <pre className="bg-slate-100 p-3 rounded text-xs overflow-auto max-h-40 break-words whitespace-pre-wrap word-break-break-word">
-                              {JSON.stringify(selectedJob.visual_planning.plan, null, 2)}
-                            </pre>
+                            <strong>Error:</strong> {selectedJob.visual_sections.error}
                           </div>
                         )}
 
                         {/* Clips */}
-                        {selectedJob.visual_planning.clips && selectedJob.visual_planning.clips.length > 0 && (
+                        {selectedJob.visual_sections.clips && selectedJob.visual_sections.clips.length > 0 && (
                           <div className="space-y-2">
                             <h4 className="font-semibold text-sm">
-                              Generated Clips ({selectedJob.visual_planning.clips.length})
+                              Generated Clips ({selectedJob.visual_sections.clips.length})
                             </h4>
                             <div className="space-y-2">
-                              {selectedJob.visual_planning.clips.map((clip: any, idx: number) => (
+                              {selectedJob.visual_sections.clips.map((clip: any, idx: number) => (
                                 <div key={idx} className="border border-slate-200 rounded p-2 text-xs">
-                                  <div className="font-semibold text-slate-700">{clip.clip_id}</div>
+                                  <div className="font-semibold text-slate-700">{clip.clip_id || clip.section_title}</div>
                                   <div className="text-slate-600 mt-1">
                                     Status: {clip.success ? "✓ Success" : "✗ Failed"}
                                   </div>
-                                  {clip.error && (
-                                    <div className="text-red-600 mt-1">{clip.error}</div>
+                                  {clip.error_message && (
+                                    <div className="text-red-600 mt-1">{clip.error_message}</div>
                                   )}
                                 </div>
                               ))}

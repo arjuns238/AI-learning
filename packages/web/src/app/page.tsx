@@ -11,22 +11,14 @@ import {
   VideoPlayer,
 } from "@/components/pipeline";
 import {
-  ContentSection,
   EnhancedQuizSection,
   ContextualQABox,
   ExploreDeeper,
 } from "@/components/lesson";
-import type { EnhancedQuiz, QuizQuestion, QuizOption, AnimationClipSummary, ClipPlacement } from "@/types/pipeline";
+import { DynamicSectionRenderer } from "@/components/lesson/DynamicSectionRenderer";
+import type { EnhancedQuiz, QuizQuestion, QuizOption, AnimationClipSummary } from "@/types/pipeline";
 
 const API_BASE = "http://localhost:8000";
-
-// Helper to find a clip by placement
-function getClipByPlacement(
-  clips: AnimationClipSummary[] | undefined,
-  placement: ClipPlacement
-): AnimationClipSummary | undefined {
-  return clips?.find((c) => c.placement === placement && c.success);
-}
 
 // Inline clip player component - displays as looping GIF-like video
 function ClipPlayer({ clip, jobId, className = "" }: { clip: AnimationClipSummary; jobId: string; className?: string }) {
@@ -47,7 +39,7 @@ function ClipPlayer({ clip, jobId, className = "" }: { clip: AnimationClipSummar
         Your browser does not support video playback.
       </video>
       <div className="px-3 py-2 bg-slate-50 text-xs text-slate-500 flex justify-between">
-        <span>{clip.concept}</span>
+        <span>{clip.section_title}</span>
         <span>{clip.duration_seconds.toFixed(1)}s</span>
       </div>
     </div>
@@ -58,100 +50,82 @@ export default function Home() {
   const { isLoading, progress, result, error, generate, reset } = usePipeline();
   const [qaMinimized, setQaMinimized] = useState(true);
 
-  // Generate mock quiz from pedagogy data (Phase 1: backend will do this later)
+  // Generate quiz from pedagogy sections (dynamic based on content)
   const enhancedQuiz = useMemo<EnhancedQuiz | null>(() => {
     if (!result?.pedagogy) return null;
 
     const { pedagogy } = result;
+    const sections = pedagogy.sections || [];
 
-    // Generate questions from the pedagogical context
-    const questions: QuizQuestion[] = [
-      {
-        id: "q1",
-        question: pedagogy.check_for_understanding,
+    if (sections.length === 0) return null;
+
+    // Generate questions based on sections
+    const questions: QuizQuestion[] = [];
+
+    // Question about the main topic
+    questions.push({
+      id: "q1",
+      question: `What is the main concept behind ${pedagogy.topic}?`,
+      options: [
+        {
+          text: pedagogy.summary,
+          is_correct: true,
+          misconception_hint: undefined,
+        },
+        {
+          text: "It's a purely theoretical concept with no practical applications.",
+          is_correct: false,
+          misconception_hint: "This concept has practical applications as discussed in the lesson.",
+        },
+        {
+          text: "None of the above applies to this concept.",
+          is_correct: false,
+          misconception_hint: "Review the lesson summary above.",
+        },
+        {
+          text: "All options are equally correct.",
+          is_correct: false,
+          misconception_hint: "One answer is more accurate than the others.",
+        },
+      ] as QuizOption[],
+      explanation: pedagogy.summary,
+    });
+
+    // Add questions based on sections (first 2 sections)
+    sections.slice(0, 2).forEach((section, idx) => {
+      questions.push({
+        id: `q${idx + 2}`,
+        question: `Regarding "${section.title}", which statement is most accurate?`,
         options: [
           {
-            text: pedagogy.target_mental_model.split(".")[0] + ".",
+            text: section.content.split(".")[0] + ".",
             is_correct: true,
             misconception_hint: undefined,
           },
           {
-            text: pedagogy.common_misconception,
+            text: "This section is not relevant to the main topic.",
             is_correct: false,
-            misconception_hint: `This is actually a common misconception. ${pedagogy.disambiguating_contrast}`,
+            misconception_hint: "This section is directly relevant to understanding the topic.",
           },
           {
-            text: "None of the above applies to this concept.",
+            text: "The opposite is actually true.",
             is_correct: false,
-            misconception_hint: "Actually, the concept does have clear applications. Review the explanation above.",
+            misconception_hint: "Review the section content above.",
           },
           {
-            text: "All options are equally correct.",
+            text: "This only applies in specialized circumstances.",
             is_correct: false,
-            misconception_hint: "One answer is more accurate than the others. Think about what distinguishes the correct mental model from common misconceptions.",
+            misconception_hint: "The concept has broader applicability.",
           },
         ] as QuizOption[],
-        explanation: pedagogy.target_mental_model,
-      },
-      {
-        id: "q2",
-        question: `What distinguishes ${pedagogy.topic} from similar concepts?`,
-        options: [
-          {
-            text: pedagogy.disambiguating_contrast,
-            is_correct: true,
-            misconception_hint: undefined,
-          },
-          {
-            text: "There is no meaningful distinction.",
-            is_correct: false,
-            misconception_hint: "There are important distinctions! Review the key contrasts mentioned above.",
-          },
-          {
-            text: pedagogy.common_misconception,
-            is_correct: false,
-            misconception_hint: "This represents a common misconception, not the key distinction.",
-          },
-          {
-            text: "The distinction is purely theoretical with no practical implications.",
-            is_correct: false,
-            misconception_hint: "The distinction has real practical implications. Consider the concrete example discussed.",
-          },
-        ] as QuizOption[],
-        explanation: `The key distinction is: ${pedagogy.disambiguating_contrast}`,
-      },
-      {
-        id: "q3",
-        question: `Which of the following best describes a concrete example of ${pedagogy.topic}?`,
-        options: [
-          {
-            text: pedagogy.concrete_anchor,
-            is_correct: true,
-            misconception_hint: undefined,
-          },
-          {
-            text: "An abstract theoretical framework without real-world applications.",
-            is_correct: false,
-            misconception_hint: "There are concrete, real-world applications of this concept.",
-          },
-          {
-            text: "A purely mathematical construct with no intuitive meaning.",
-            is_correct: false,
-            misconception_hint: "This concept has intuitive, relatable applications.",
-          },
-          {
-            text: "Something that only applies in very specialized circumstances.",
-            is_correct: false,
-            misconception_hint: "While there may be specialized applications, the concept has broader relevance.",
-          },
-        ] as QuizOption[],
-        explanation: pedagogy.concrete_anchor,
-      },
-    ];
+        explanation: section.content,
+        related_section_order: section.order,
+      });
+    });
 
     return {
       questions,
-      passing_score: 2,
+      passing_score: Math.ceil(questions.length * 0.66),
     };
   }, [result?.pedagogy]);
 
@@ -163,7 +137,7 @@ export default function Home() {
       `Why is ${pedagogy.topic} important in practice?`,
       `What are common mistakes when applying ${pedagogy.topic}?`,
       `How does ${pedagogy.topic} relate to other concepts?`,
-      `Can you explain the math behind ${pedagogy.topic}?`,
+      `Can you explain more about ${pedagogy.topic}?`,
     ];
   }, [result?.pedagogy]);
 
@@ -226,12 +200,8 @@ export default function Home() {
                   <p>Total time: {result.timing.total_seconds.toFixed(1)}s</p>
                   <div className="grid grid-cols-2 gap-2 pt-2">
                     <span>L1 (Intent): {result.timing.layer1_seconds.toFixed(1)}s</span>
-                    <span>L2 (Story): {result.timing.layer2_seconds.toFixed(1)}s</span>
                     <span>L3 (Prompt): {result.timing.layer3_seconds.toFixed(1)}s</span>
                     <span>L4 (Video): {result.timing.layer4_seconds.toFixed(1)}s</span>
-                    {result.timing.visual_planning_seconds !== undefined && result.timing.visual_planning_seconds > 0 && (
-                      <span>Visual Plan: {result.timing.visual_planning_seconds.toFixed(1)}s</span>
-                    )}
                     {result.timing.clip_generation_seconds !== undefined && result.timing.clip_generation_seconds > 0 && (
                       <span>Clips: {result.timing.clip_generation_seconds.toFixed(1)}s</span>
                     )}
@@ -294,53 +264,23 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Introduction - Core Question */}
+                {/* Summary */}
                 {result.pedagogy && (
                   <Card className="border-blue-200/50 bg-gradient-to-br from-blue-50 to-white">
                     <CardHeader>
                       <CardTitle className="text-lg text-blue-900">
-                        The Core Question
+                        Overview
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
                       <p className="text-lg text-blue-800 leading-relaxed">
-                        {result.pedagogy.core_question}
+                        {result.pedagogy.summary}
                       </p>
                     </CardContent>
                   </Card>
                 )}
 
-                {/* Key Mental Model */}
-                {result.pedagogy && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-lg">Understanding the Concept</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <p className="text-slate-700 leading-relaxed">
-                        {result.pedagogy.target_mental_model}
-                      </p>
-                      {result.pedagogy.spatial_metaphor && (
-                        <div className="rounded-lg border-l-4 border-indigo-500 bg-indigo-50 p-4">
-                          <p className="font-medium text-indigo-800">
-                            <span className="mr-2">🎯</span>
-                            Visual Metaphor: {result.pedagogy.spatial_metaphor}
-                          </p>
-                        </div>
-                      )}
-                      {/* Core mechanism animation clip */}
-                      {getClipByPlacement(result.clips, "core_mechanism") && (
-                        <ClipPlayer
-                          clip={getClipByPlacement(result.clips, "core_mechanism")!}
-                          jobId={result.job_id}
-                          className="mt-4"
-                        />
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Video Section */}
+                {/* Video Section (if single video exists) */}
                 {result.video && (
                   <Card>
                     <CardHeader>
@@ -352,77 +292,18 @@ export default function Home() {
                   </Card>
                 )}
 
-                {/* Storyboard Beats as Content Sections */}
-                {result.storyboard && result.storyboard.beats.length > 0 && (
+                {/* Dynamic Sections with embedded clips */}
+                {result.pedagogy && result.pedagogy.sections && result.pedagogy.sections.length > 0 && (
                   <div className="space-y-6">
                     <h3 className="text-xl font-semibold text-slate-800">
-                      Step-by-Step Breakdown
+                      Lesson Content
                     </h3>
-                    {result.storyboard.beats.map((beat, index) => (
-                      <ContentSection
-                        key={`beat-${index}`}
-                        beat={beat}
-                        beatIndex={index}
-                      />
-                    ))}
+                    <DynamicSectionRenderer
+                      sections={result.pedagogy.sections}
+                      clips={result.clips}
+                      jobId={result.job_id}
+                    />
                   </div>
-                )}
-
-                {/* Common Misconception Warning */}
-                {result.pedagogy && (
-                  <Card className="border-amber-200/50 bg-amber-50/50">
-                    <CardHeader>
-                      <CardTitle className="text-lg text-amber-800">
-                        <span className="mr-2">⚠️</span>
-                        Common Misconception
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <p className="text-amber-900">
-                        {result.pedagogy.common_misconception}
-                      </p>
-                      <p className="text-sm text-amber-700">
-                        <strong>The key distinction:</strong> {result.pedagogy.disambiguating_contrast}
-                      </p>
-                      {/* Misconception or contrast animation clip */}
-                      {(getClipByPlacement(result.clips, "misconception") ||
-                        getClipByPlacement(result.clips, "contrast")) && (
-                        <ClipPlayer
-                          clip={
-                            getClipByPlacement(result.clips, "misconception") ||
-                            getClipByPlacement(result.clips, "contrast")!
-                          }
-                          jobId={result.job_id}
-                          className="mt-4"
-                        />
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Concrete Example */}
-                {result.pedagogy && (
-                  <Card className="border-emerald-200/50 bg-emerald-50/50">
-                    <CardHeader>
-                      <CardTitle className="text-lg text-emerald-800">
-                        <span className="mr-2">📌</span>
-                        Concrete Example
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <p className="text-emerald-900">
-                        {result.pedagogy.concrete_anchor}
-                      </p>
-                      {/* Example animation clip */}
-                      {getClipByPlacement(result.clips, "example") && (
-                        <ClipPlayer
-                          clip={getClipByPlacement(result.clips, "example")!}
-                          jobId={result.job_id}
-                          className="mt-4"
-                        />
-                      )}
-                    </CardContent>
-                  </Card>
                 )}
 
                 {/* Enhanced Quiz */}

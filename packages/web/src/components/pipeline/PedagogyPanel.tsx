@@ -2,91 +2,102 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { PedagogicalMetadata } from "@/types/pipeline";
+import type { PedagogicalMetadata, PedagogicalSection } from "@/types/pipeline";
 
 type PedagogyPanelProps = {
   pedagogy: PedagogicalMetadata;
 };
 
+function SectionSummaryCard({ section }: { section: PedagogicalSection }) {
+  const hasVisual = section.visual?.should_animate;
+
+  return (
+    <div className="rounded-lg border bg-white p-3 shadow-sm">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-xs font-medium text-white">
+          {section.order}
+        </span>
+        <span className="font-medium text-slate-900">{section.title}</span>
+        {hasVisual && (
+          <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+            Has Animation
+          </Badge>
+        )}
+      </div>
+      <p className="text-sm text-slate-600 line-clamp-2">{section.content}</p>
+
+      {/* Show structured content indicators */}
+      <div className="mt-2 flex gap-2 flex-wrap">
+        {section.steps && section.steps.length > 0 && (
+          <Badge variant="outline" className="text-xs">
+            {section.steps.length} steps
+          </Badge>
+        )}
+        {section.math_expressions && section.math_expressions.length > 0 && (
+          <Badge variant="outline" className="text-xs">
+            Math
+          </Badge>
+        )}
+        {section.comparison && (
+          <Badge variant="outline" className="text-xs">
+            Comparison
+          </Badge>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function PedagogyPanel({ pedagogy }: PedagogyPanelProps) {
+  // Sort sections by order
+  const sortedSections = [...pedagogy.sections].sort((a, b) => a.order - b.order);
+  const visualSections = sortedSections.filter(s => s.visual?.should_animate);
+
   return (
     <div className="space-y-4">
-      {/* Core Question */}
+      {/* Topic and Summary */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-base">
-            Core Question
+            {pedagogy.topic}
             {pedagogy.difficulty_level && (
               <Badge variant="outline" className="text-xs">
                 Level {pedagogy.difficulty_level}/5
               </Badge>
             )}
+            {pedagogy.domain && (
+              <Badge variant="outline" className="text-xs capitalize">
+                {pedagogy.domain}
+              </Badge>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-lg italic text-slate-700">
-            {pedagogy.core_question}
-          </p>
+          <p className="text-slate-700">{pedagogy.summary}</p>
         </CardContent>
       </Card>
 
-      {/* Target Mental Model */}
+      {/* Sections Overview */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Target Mental Model</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-slate-700">{pedagogy.target_mental_model}</p>
-        </CardContent>
-      </Card>
-
-      {/* Common Misconception */}
-      <Card className="border-amber-200/70 bg-amber-50/50">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base text-amber-800">
-            Common Misconception
+          <CardTitle className="text-base flex items-center gap-2">
+            Sections
+            <Badge variant="outline" className="text-xs">
+              {sortedSections.length} total
+            </Badge>
+            {visualSections.length > 0 && (
+              <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                {visualSections.length} with animations
+              </Badge>
+            )}
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <p className="text-amber-900">{pedagogy.common_misconception}</p>
+        <CardContent className="space-y-3">
+          {sortedSections.map((section) => (
+            <SectionSummaryCard key={section.order} section={section} />
+          ))}
         </CardContent>
       </Card>
-
-      {/* Key Distinction */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Key Distinction</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-slate-700">{pedagogy.disambiguating_contrast}</p>
-        </CardContent>
-      </Card>
-
-      {/* Concrete Example */}
-      <Card className="border-emerald-200/70 bg-emerald-50/50">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base text-emerald-800">
-            Concrete Example
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-emerald-900">{pedagogy.concrete_anchor}</p>
-        </CardContent>
-      </Card>
-
-      {/* Visual Metaphor (if present) */}
-      {pedagogy.spatial_metaphor && (
-        <Card className="border-blue-200/70 bg-blue-50/50">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base text-blue-800">
-              Visual Metaphor
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-blue-900">{pedagogy.spatial_metaphor}</p>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }

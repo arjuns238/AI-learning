@@ -1,8 +1,10 @@
 """
 Full Pipeline endpoints - Topic → Video + Pedagogical Metadata
 
-Provides synchronous and asynchronous endpoints for the complete
-Layer 1 → Layer 2 → Layer 3 → Layer 4 pipeline.
+New Architecture (section-based):
+- Layer 1: Topic → Pedagogical Intent with freeform sections + embedded visual hints
+- Layer 3: Visual sections → Manim prompts
+- Layer 4: Manim prompts → Videos
 
 Uses Supabase for persistent job storage and video hosting.
 """
@@ -84,16 +86,6 @@ async def generate_full_pipeline(request: FullPipelineRequest):
                 error=error
             )
 
-        def visual_debug_callback(visual_plan: dict, clip_layer_data: list, duration: float, error: str = None):
-            """Save visual planning and clip Layer 3/4 data."""
-            DebugJobStore.update_visual_planning(
-                job_id,
-                visual_plan=visual_plan,
-                clips=clip_layer_data,
-                duration_seconds=duration,
-                error=error
-            )
-
         # Run pipeline (blocking)
         result = orch.run(
             topic=request.topic,
@@ -102,7 +94,6 @@ async def generate_full_pipeline(request: FullPipelineRequest):
             include_generated_code=request.include_generated_code,
             progress_callback=progress_callback,
             debug_callback=debug_callback,
-            visual_debug_callback=visual_debug_callback,
             external_job_id=job_id,
         )
 
@@ -204,16 +195,6 @@ async def start_async_pipeline(
                     error=error
                 )
 
-            def visual_debug_callback(visual_plan: dict, clip_layer_data: list, duration: float, error: str = None):
-                """Save visual planning and clip Layer 3/4 data."""
-                DebugJobStore.update_visual_planning(
-                    job_id,
-                    visual_plan=visual_plan,
-                    clips=clip_layer_data,
-                    duration_seconds=duration,
-                    error=error
-                )
-
             result = orch.run(
                 topic=request.topic,
                 domain=request.domain,
@@ -221,7 +202,6 @@ async def start_async_pipeline(
                 include_generated_code=request.include_generated_code,
                 progress_callback=progress_callback,
                 debug_callback=debug_callback,
-                visual_debug_callback=visual_debug_callback,
                 external_job_id=job_id,
             )
 
@@ -458,72 +438,56 @@ async def get_debug_job(job_id: str):
 
     Returns:
         - job_id, topic, status
-        - pipeline_mode: "visual_planner" or "storyboard" (Layer 2)
-        - visual_planning: data about identified opportunities and clips
-        - layers: dict with layer1-4, each containing input, output, duration, error
+        - visual_sections: data about clips generated from visual hints
+        - layers: dict with layer1, layer3, layer4, each containing input, output, duration, error
     """
     job = DebugJobStore.get_job(job_id)
 
     if not job:
         raise HTTPException(status_code=404, detail=f"Debug job {job_id} not found")
 
-    # Determine which pipeline mode was used
+    # Check if we have clips
     has_clips = bool(job.get("clips"))
-    has_layer2 = bool(job.get("layer2_output"))
-    pipeline_mode = "visual_planner" if has_clips else ("storyboard" if has_layer2 else "unknown")
 
     # Format response for readability
     return {
         "job_id": job["job_id"],
         "topic": job["topic"],
         "status": job["status"],
-        "pipeline_mode": pipeline_mode,
         "created_at": job["created_at"],
         "updated_at": job["updated_at"],
         "total_duration_seconds": job.get("total_duration_seconds"),
         "final_video_path": job.get("final_video_path"),
-        # Visual planning data (Phase 2)
-        "visual_planning": {
-            "plan": job.get("visual_plan"),
+        # Visual sections data (clips from Layer 1 visual hints)
+        "visual_sections": {
             "clips": job.get("clips"),
-            "duration_seconds": job.get("visual_planning_duration_seconds"),
-            "error": job.get("visual_planning_error"),
-        } if has_clips or job.get("visual_plan") else None,
-        # Traditional layer data
+            "duration_seconds": job.get("clip_generation_duration_seconds"),
+            "error": job.get("clip_generation_error"),
+        } if has_clips else None,
+        # Layer data (Layer 1, 3, 4 - no more Layer 2)
         "layers": {
             "layer1": {
-                "name": "Topic → Pedagogical Intent",
+                "name": "Topic → Pedagogical Intent (with sections + visual hints)",
                 "input": job.get("layer1_input"),
                 "output": job.get("layer1_output"),
                 "duration_seconds": job.get("layer1_duration_seconds"),
                 "error": job.get("layer1_error"),
             },
-            "layer2": {
-                "name": "Pedagogical Intent → Storyboard",
-                "note": "In visual_planner mode, see visual_planning.plan instead" if pipeline_mode == "visual_planner" else None,
-                "input": job.get("layer2_input"),
-                "output": job.get("layer2_output"),
-                "duration_seconds": job.get("layer2_duration_seconds"),
-                "error": job.get("layer2_error"),
-                "skipped": pipeline_mode == "visual_planner",
-            },
             "layer3": {
-                "name": "Visual Opportunity → Manim Prompt",
-                "note": "In visual_planner mode, contains array of prompts (one per clip)" if pipeline_mode == "visual_planner" else None,
+                "name": "Visual Section → Manim Prompt",
+                "note": "Contains array of prompts (one per visual section)" if has_clips else None,
                 "input": job.get("layer3_input"),
                 "output": job.get("layer3_output"),
                 "duration_seconds": job.get("layer3_duration_seconds"),
                 "error": job.get("layer3_error"),
-                "is_array": pipeline_mode == "visual_planner" and isinstance(job.get("layer3_input"), dict) and "clips" in (job.get("layer3_input") or {}),
             },
             "layer4": {
                 "name": "Manim Prompt → Video",
-                "note": "In visual_planner mode, contains array of executions (one per clip)" if pipeline_mode == "visual_planner" else None,
+                "note": "Contains array of executions (one per visual section)" if has_clips else None,
                 "input": job.get("layer4_input"),
                 "output": job.get("layer4_output"),
                 "duration_seconds": job.get("layer4_duration_seconds"),
                 "error": job.get("layer4_error"),
-                "is_array": pipeline_mode == "visual_planner" and isinstance(job.get("layer4_input"), dict) and "clips" in (job.get("layer4_input") or {}),
             },
         },
     }

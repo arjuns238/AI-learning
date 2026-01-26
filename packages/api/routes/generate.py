@@ -16,14 +16,12 @@ class GenerateRequest(BaseModel):
     topic: str
     domain: Optional[str] = None
     difficulty_level: Optional[int] = None
-    num_exemplars: int = 3
 
 
 class BatchGenerateRequest(BaseModel):
     topics: List[str]
     domain: Optional[str] = None
     difficulty_level: Optional[int] = None
-    num_exemplars: int = 3
 
 
 # Initialize generator (reuse across requests)
@@ -49,7 +47,6 @@ async def generate_pedagogical_intent(request: GenerateRequest):
             "topic": "Backpropagation in Neural Networks",
             "domain": "machine_learning",
             "difficulty_level": 4,
-            "num_exemplars": 3
         }
     """
     try:
@@ -58,7 +55,6 @@ async def generate_pedagogical_intent(request: GenerateRequest):
             topic=request.topic,
             domain=request.domain,
             difficulty_level=request.difficulty_level,
-            num_exemplars=request.num_exemplars
         )
         return result
     except Exception as e:
@@ -83,7 +79,6 @@ async def generate_batch(request: BatchGenerateRequest):
                     topic=topic,
                     domain=request.domain,
                     difficulty_level=request.difficulty_level,
-                    num_exemplars=request.num_exemplars
                 )
                 results.append({
                     "topic": topic,

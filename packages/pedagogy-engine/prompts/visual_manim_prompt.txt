@@ -1,18 +1,18 @@
-Create a short (15-20 second) educational animation for the following concept.
+Create a short (15-20 second) educational animation for a pedagogical section.
 
 ## Topic Context
 **Topic:** {TOPIC}
-**Core Mental Model:** {TARGET_MENTAL_MODEL}
+**Lesson Summary:** {SUMMARY}
 
-## Visual to Create
-**Concept:** {CONCEPT}
-**What to animate:** {DESCRIPTION}
-**Pedagogical Purpose:** {PEDAGOGICAL_PURPOSE}
+## Section to Animate
+**Section Title:** {SECTION_TITLE}
+**Section Content:** {SECTION_CONTENT}
+**What to animate:** {ANIMATION_DESCRIPTION}
 **Target Duration:** {DURATION_HINT} seconds
 
 ## Animation Requirements
 
-1. **Focus**: This animation should visualize ONLY the specific concept described above, not the entire topic
+1. **Focus**: This animation should visualize ONLY what is described in the animation description above
 2. **Clarity**: Visual elements should be simple, clear, and easy to follow
 3. **Pacing**: Animation should be smooth and give viewers time to understand each step
 4. **Labels**: Include minimal on-screen text to label key elements (not paragraphs of explanation)
@@ -26,4 +26,4 @@ Create a short (15-20 second) educational animation for the following concept.
 - Use proper mathematical notation where applicable
 - Ensure animations are smooth and pedagogically clear
 
-The animation should be self-contained and complement text-based explanations.
+The animation should be self-contained and complement the section's text-based explanation.

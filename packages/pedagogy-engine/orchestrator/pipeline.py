@@ -1,34 +1,37 @@
 """
 Full Pipeline Orchestrator: Topic → Video + Pedagogical Metadata
 
-Chains all 4 layers to produce complete educational content from a topic.
+New Architecture (section-based):
+- Layer 1: Topic → Pedagogical Intent with freeform sections + embedded visual hints
+- Layer 3: Visual sections → Manim prompts
+- Layer 4: Manim prompts → Videos
+
+No more Layer 2 (storyboard) or separate Visual Planner.
+Visuals are now identified inline during Layer 1 generation.
 """
 
 import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Callable
-from dataclasses import dataclass, field
+from typing import Optional, Callable, List
+from dataclasses import dataclass
 
 from layer1.generator import PedagogicalIntentGenerator
-from layer1.schema import PedagogicalIntentWithMetadata
-from layer2.generator import StoryboardGenerator
-from layer2.schema import StoryboardWithMetadata
+from layer1.schema import PedagogicalIntentWithMetadata, PedagogicalSection
 from layer3.generator import ManimPromptGenerator
 from layer3.schema import ManimPromptWithMetadata
 from layer4.generator import Layer4Generator
 from layer4.schema import ManimExecutionWithMetadata, AnimationClip
-from visual_planner.planner import VisualPlanner
-from visual_planner.schema import VisualPlanWithMetadata, VisualOpportunity
 
 from .schema import (
     PipelineStage,
     PipelineProgress,
     FullPipelineResponse,
     PedagogicalMetadata,
-    StoryboardSummary,
-    StoryboardBeat,
+    PedagogicalSectionSummary,
+    VisualHintSummary,
+    ComparisonSummary,
     VideoMetadata,
     TimingBreakdown,
     AnimationClipSummary,
@@ -39,10 +42,8 @@ from .schema import (
 class LayerTimings:
     """Track execution time for each layer."""
     layer1: float = 0.0
-    layer2: float = 0.0
     layer3: float = 0.0
     layer4: float = 0.0
-    visual_planning: float = 0.0
     clip_generation: float = 0.0
 
 
@@ -50,11 +51,10 @@ class FullPipelineOrchestrator:
     """
     Orchestrates the complete pipeline from topic to video.
 
-    Chains:
-    - Layer 1: Topic → Pedagogical Intent
-    - Layer 2: Pedagogical Intent → Storyboard
-    - Layer 3: Storyboard → Manim Prompt
-    - Layer 4: Manim Prompt → Video
+    New flow:
+    - Layer 1: Topic → Pedagogical Intent (with sections + visual hints)
+    - Layer 3: Visual sections → Manim prompts
+    - Layer 4: Manim prompts → Videos
 
     Supports:
     - Progress callbacks for real-time updates
@@ -68,9 +68,6 @@ class FullPipelineOrchestrator:
         intent_model: Optional[str] = None,
         intent_temperature: float = 0.7,
         intent_api_provider: str = "anthropic",
-
-        # Layer 2 config
-        storyboard_strategy: str = "hybrid",
 
         # Layer 4 config
         code_api_provider: str = "anthropic",
@@ -89,14 +86,10 @@ class FullPipelineOrchestrator:
         self.video_base_url = video_base_url
 
         # Store config for lazy initialization
-        # Layer 1 now handles path resolution internally
         self._intent_config = {
             "model_name": intent_model,
             "temperature": intent_temperature,
             "api_provider": intent_api_provider,
-        }
-        self._storyboard_config = {
-            "strategy": storyboard_strategy,
         }
         self._layer4_config = {
             "api_provider": code_api_provider,
@@ -108,29 +101,16 @@ class FullPipelineOrchestrator:
             "rag_examples": rag_examples,
         }
 
-        # Visual planner config
-        self._visual_planner_config = {
-            "api_provider": intent_api_provider,
-        }
-
         # Lazy-initialized generators
         self._layer1 = None
-        self._layer2 = None
         self._layer3 = None
         self._layer4 = None
-        self._visual_planner = None
 
     @property
     def layer1(self) -> PedagogicalIntentGenerator:
         if self._layer1 is None:
             self._layer1 = PedagogicalIntentGenerator(**self._intent_config)
         return self._layer1
-
-    @property
-    def layer2(self) -> StoryboardGenerator:
-        if self._layer2 is None:
-            self._layer2 = StoryboardGenerator(**self._storyboard_config)
-        return self._layer2
 
     @property
     def layer3(self) -> ManimPromptGenerator:
@@ -144,12 +124,6 @@ class FullPipelineOrchestrator:
             self._layer4 = Layer4Generator(**self._layer4_config)
         return self._layer4
 
-    @property
-    def visual_planner(self) -> VisualPlanner:
-        if self._visual_planner is None:
-            self._visual_planner = VisualPlanner(**self._visual_planner_config)
-        return self._visual_planner
-
     def run(
         self,
         topic: str,
@@ -158,7 +132,6 @@ class FullPipelineOrchestrator:
         include_generated_code: bool = False,
         progress_callback: Optional[Callable[[PipelineProgress], None]] = None,
         debug_callback: Optional[Callable[[int, dict, dict, float, Optional[str]], None]] = None,
-        visual_debug_callback: Optional[Callable[[dict, list, float, Optional[str]], None]] = None,
         external_job_id: Optional[str] = None
     ) -> FullPipelineResponse:
         """
@@ -181,15 +154,9 @@ class FullPipelineOrchestrator:
         started_at = datetime.now()
         timings = LayerTimings()
 
-        # Initialize partial results
+        # Initialize results
         pedagogical_intent: Optional[PedagogicalIntentWithMetadata] = None
-        storyboard: Optional[StoryboardWithMetadata] = None
-        manim_prompt: Optional[ManimPromptWithMetadata] = None
-        execution: Optional[ManimExecutionWithMetadata] = None
-
-        # Visual planning and clips (Phase 2)
-        visual_plan: Optional[VisualPlanWithMetadata] = None
-        generated_clips: list[AnimationClip] = []
+        generated_clips: List[AnimationClip] = []
 
         error_stage: Optional[str] = None
         error_message: Optional[str] = None
@@ -222,169 +189,147 @@ class FullPipelineOrchestrator:
             )
             timings.layer1 = time.time() - layer1_start
 
-            update_progress(PipelineStage.LAYER1_INTENT, 25, "Pedagogical intent generated")
+            update_progress(PipelineStage.LAYER1_INTENT, 30, "Pedagogical intent generated")
             print(f"✓ Layer 1 complete: {timings.layer1:.1f}s")
 
             # Debug callback
             if debug_callback:
                 debug_callback(1, layer1_input, pedagogical_intent.model_dump(), timings.layer1, None)
 
-            # === Visual Planning: Identify 1-2 opportunities for animation ===
-            try:
-                update_progress(PipelineStage.VISUAL_PLANNING, 20, "Identifying visual opportunities...")
+            # === Extract visual sections from Layer 1 output ===
+            intent = pedagogical_intent.intent
+            visual_sections = intent.get_visual_sections()
+            print(f"Found {len(visual_sections)} sections with visual hints")
 
-                vp_start = time.time()
-                visual_plan = self.visual_planner.identify_opportunities(pedagogical_intent)
-                timings.visual_planning = time.time() - vp_start
+            # === Generate clips for each visual section ===
+            if visual_sections:
+                clip_layer_data = []
+                update_progress(
+                    PipelineStage.GENERATING_CLIPS,
+                    35,
+                    f"Generating {len(visual_sections)} animation clips..."
+                )
 
-                opportunities = visual_plan.plan.opportunities
-                print(f"✓ Visual Planning complete: {len(opportunities)} opportunities ({timings.visual_planning:.1f}s)")
+                clip_start = time.time()
+                for i, section in enumerate(visual_sections):
+                    try:
+                        print(f"  Generating clip {i+1}/{len(visual_sections)}: {section.title}")
 
-                # === Generate clips for each opportunity ===
-                if opportunities:
-                    # Track Layer 3/4 data for each clip
-                    clip_layer_data = []
-                    update_progress(PipelineStage.GENERATING_CLIPS, 22, f"Generating {len(opportunities)} animation clips...")
-
-                    clip_start = time.time()
-                    for i, opportunity in enumerate(opportunities):
-                        try:
-                            print(f"  Generating clip {i+1}/{len(opportunities)}: {opportunity.concept}")
-
-                            # Layer 3: Generate focused Manim prompt for this opportunity
-                            clip_prompt = self.layer3.generate_for_visual(
-                                opportunity=opportunity,
-                                intent=pedagogical_intent.intent
-                            )
-
-                            # Layer 4: Generate the video
-                            clip_execution = self.layer4.generate(clip_prompt)
-
-                            # Create AnimationClip from result
-                            clip = AnimationClip(
-                                clip_id=opportunity.id,
-                                opportunity_id=opportunity.id,
-                                concept=opportunity.concept,
-                                placement=opportunity.placement,
-                                video_path=clip_execution.execution_result.video_path if clip_execution.execution_result.success else None,
-                                duration_seconds=clip_execution.execution_result.execution_time_seconds if clip_execution.execution_result.success else 0.0,
-                                success=clip_execution.execution_result.success,
-                                error_message=clip_execution.execution_result.error_message,
-                                execution_time_seconds=clip_execution.execution_result.execution_time_seconds,
-                                generated_code=clip_execution.code_response.code,
-                            )
-                            generated_clips.append(clip)
-
-                            # Track Layer 3/4 data for this clip
-                            clip_layer_data.append({
-                                "clip_id": opportunity.id,
-                                "concept": opportunity.concept,
-                                "layer3_prompt": clip_prompt.model_dump(),
-                                "layer4_execution": clip_execution.model_dump(),
-                            })
-
-                            if clip.success:
-                                print(f"    ✓ Clip generated: {clip.video_path}")
-                            else:
-                                print(f"    ✗ Clip failed: {clip.error_message}")
-
-                        except Exception as clip_error:
-                            print(f"    ✗ Clip {i+1} failed: {clip_error}")
-                            generated_clips.append(AnimationClip(
-                                clip_id=opportunity.id,
-                                opportunity_id=opportunity.id,
-                                concept=opportunity.concept,
-                                placement=opportunity.placement,
-                                success=False,
-                                error_message=str(clip_error),
-                            ))
-
-                    timings.clip_generation = time.time() - clip_start
-                    successful_clips = sum(1 for c in generated_clips if c.success)
-                    print(f"✓ Clip generation complete: {successful_clips}/{len(opportunities)} succeeded ({timings.clip_generation:.1f}s)")
-
-                    # Visual debug callback with plan + clip layer data
-                    if visual_debug_callback:
-                        visual_debug_callback(
-                            visual_plan.model_dump(),
-                            clip_layer_data,
-                            timings.visual_planning + timings.clip_generation,
-                            None
+                        # Layer 3: Generate focused Manim prompt for this section
+                        layer3_start = time.time()
+                        clip_prompt = self.layer3.generate_for_section(
+                            section=section,
+                            intent=intent
                         )
+                        layer3_time = time.time() - layer3_start
+                        timings.layer3 += layer3_time
 
-                    # Populate layer3 and layer4 columns with aggregated data from all clips
-                    # This allows the debug endpoint to show layer 3/4 data in visual planner mode
-                    if debug_callback and clip_layer_data:
-                        # Aggregate layer 3 inputs/outputs (one per clip)
-                        layer3_inputs = []
-                        layer3_outputs = []
-                        layer4_inputs = []
-                        layer4_outputs = []
+                        # Layer 4: Generate the video
+                        layer4_start = time.time()
+                        clip_execution = self.layer4.generate(clip_prompt)
+                        layer4_time = time.time() - layer4_start
+                        timings.layer4 += layer4_time
 
-                        for clip_data in clip_layer_data:
-                            clip_id = clip_data["clip_id"]
-                            concept = clip_data["concept"]
-                            layer3_prompt = clip_data.get("layer3_prompt", {})
-                            layer4_exec = clip_data.get("layer4_execution", {})
-
-                            # Layer 3: input is the visual opportunity, output is the manim prompt
-                            layer3_inputs.append({
-                                "clip_id": clip_id,
-                                "concept": concept,
-                                "opportunity": layer3_prompt.get("metadata", {}).get("source_visual_opportunity"),
-                                "pedagogical_intent": {
-                                    "topic": pedagogical_intent.intent.topic,
-                                    "core_question": pedagogical_intent.intent.core_question,
-                                    "target_mental_model": pedagogical_intent.intent.target_mental_model,
-                                }
-                            })
-                            layer3_outputs.append({
-                                "clip_id": clip_id,
-                                "prompt": layer3_prompt.get("prompt"),
-                                "metadata": layer3_prompt.get("metadata"),
-                            })
-
-                            # Layer 4: input is the manim prompt, output is the execution result
-                            layer4_inputs.append({
-                                "clip_id": clip_id,
-                                "prompt_title": layer3_prompt.get("prompt", {}).get("title"),
-                                "prompt": layer3_prompt.get("prompt"),
-                            })
-                            layer4_outputs.append({
-                                "clip_id": clip_id,
-                                "code": layer4_exec.get("code_response", {}).get("code"),
-                                "execution_result": layer4_exec.get("execution_result"),
-                                "metadata": layer4_exec.get("metadata"),
-                            })
-
-                        # Save aggregated layer 3 data
-                        debug_callback(
-                            3,
-                            {"clips": layer3_inputs, "clip_count": len(layer3_inputs)},
-                            {"clips": layer3_outputs, "clip_count": len(layer3_outputs)},
-                            timings.clip_generation * 0.3,  # Approximate layer 3 portion
-                            None
+                        # Create AnimationClip from result
+                        clip = AnimationClip(
+                            clip_id=f"section_{section.order}",
+                            opportunity_id=f"section_{section.order}",
+                            concept=section.title,
+                            placement=f"section_{section.order}",
+                            video_path=clip_execution.execution_result.video_path if clip_execution.execution_result.success else None,
+                            duration_seconds=clip_execution.execution_result.execution_time_seconds if clip_execution.execution_result.success else 0.0,
+                            success=clip_execution.execution_result.success,
+                            error_message=clip_execution.execution_result.error_message,
+                            execution_time_seconds=clip_execution.execution_result.execution_time_seconds,
+                            generated_code=clip_execution.code_response.code,
                         )
+                        generated_clips.append(clip)
 
-                        # Save aggregated layer 4 data
-                        debug_callback(
-                            4,
-                            {"clips": layer4_inputs, "clip_count": len(layer4_inputs)},
-                            {"clips": layer4_outputs, "clip_count": len(layer4_outputs)},
-                            timings.clip_generation * 0.7,  # Approximate layer 4 portion
-                            None
-                        )
+                        # Track Layer 3/4 data for this clip
+                        clip_layer_data.append({
+                            "clip_id": f"section_{section.order}",
+                            "section_title": section.title,
+                            "section_order": section.order,
+                            "layer3_prompt": clip_prompt.model_dump(),
+                            "layer4_execution": clip_execution.model_dump(),
+                        })
 
-                    # Skip Layer 2/3/4 - we're using clips instead of full video
-                    if successful_clips > 0:
-                        update_progress(PipelineStage.COMPLETED, 100, "Clips generated successfully")
-                        print("✓ Skipping Layer 2/3/4 - using clip-based approach")
+                        if clip.success:
+                            print(f"    ✓ Clip generated: {clip.video_path}")
+                        else:
+                            print(f"    ✗ Clip failed: {clip.error_message}")
 
-            except Exception as vp_error:
-                print(f"✗ Visual planning failed: {vp_error}")
-                error_stage = PipelineStage.VISUAL_PLANNING.value
-                error_message = f"Visual planning failed: {str(vp_error)}"
-                update_progress(PipelineStage.FAILED, 20, error_message, str(vp_error))
+                    except Exception as clip_error:
+                        print(f"    ✗ Clip {i+1} failed: {clip_error}")
+                        generated_clips.append(AnimationClip(
+                            clip_id=f"section_{section.order}",
+                            opportunity_id=f"section_{section.order}",
+                            concept=section.title,
+                            placement=f"section_{section.order}",
+                            success=False,
+                            error_message=str(clip_error),
+                        ))
+
+                timings.clip_generation = time.time() - clip_start
+                successful_clips = sum(1 for c in generated_clips if c.success)
+                print(f"✓ Clip generation complete: {successful_clips}/{len(visual_sections)} succeeded ({timings.clip_generation:.1f}s)")
+
+                # Debug callbacks for Layer 3/4 aggregated data
+                if debug_callback and clip_layer_data:
+                    layer3_inputs = []
+                    layer3_outputs = []
+                    layer4_inputs = []
+                    layer4_outputs = []
+
+                    for clip_data in clip_layer_data:
+                        layer3_prompt = clip_data.get("layer3_prompt", {})
+                        layer4_exec = clip_data.get("layer4_execution", {})
+
+                        layer3_inputs.append({
+                            "clip_id": clip_data["clip_id"],
+                            "section_title": clip_data["section_title"],
+                            "section_order": clip_data["section_order"],
+                        })
+                        layer3_outputs.append({
+                            "clip_id": clip_data["clip_id"],
+                            "prompt": layer3_prompt.get("prompt"),
+                            "metadata": layer3_prompt.get("metadata"),
+                        })
+
+                        layer4_inputs.append({
+                            "clip_id": clip_data["clip_id"],
+                            "prompt_title": layer3_prompt.get("prompt", {}).get("title"),
+                            "prompt": layer3_prompt.get("prompt"),
+                        })
+                        layer4_outputs.append({
+                            "clip_id": clip_data["clip_id"],
+                            "code": layer4_exec.get("code_response", {}).get("code"),
+                            "execution_result": layer4_exec.get("execution_result"),
+                            "metadata": layer4_exec.get("metadata"),
+                        })
+
+                    debug_callback(
+                        3,
+                        {"clips": layer3_inputs, "clip_count": len(layer3_inputs)},
+                        {"clips": layer3_outputs, "clip_count": len(layer3_outputs)},
+                        timings.layer3,
+                        None
+                    )
+
+                    debug_callback(
+                        4,
+                        {"clips": layer4_inputs, "clip_count": len(layer4_inputs)},
+                        {"clips": layer4_outputs, "clip_count": len(layer4_outputs)},
+                        timings.layer4,
+                        None
+                    )
+
+                if successful_clips > 0:
+                    update_progress(PipelineStage.COMPLETED, 100, "Clips generated successfully")
+            else:
+                # No visual sections - still success, just no clips
+                update_progress(PipelineStage.COMPLETED, 100, "Content generated (no visual sections)")
+                print("✓ No visual sections found - pipeline complete without clips")
 
         except Exception as e:
             error_stage = PipelineStage.LAYER1_INTENT.value
@@ -394,117 +339,13 @@ class FullPipelineOrchestrator:
             if debug_callback:
                 debug_callback(1, layer1_input, None, 0, str(e))
 
-        # Layer 2/3/4 fallback is DISABLED - using visual planner mode only
-        # To re-enable, uncomment the block below
-        has_successful_clips = any(c.success for c in generated_clips)
-        print(f"Pipeline complete. Clips: {len(generated_clips)}, Successful: {sum(1 for c in generated_clips if c.success)}")
-
-        # DISABLED: Layer 2/3/4 fallback
-        if False and pedagogical_intent and not has_successful_clips:
-            layer2_input = {"pedagogical_intent": pedagogical_intent.intent.model_dump()}
-
-            try:
-                # === Layer 2: Pedagogical Intent → Storyboard ===
-                update_progress(PipelineStage.LAYER2_STORYBOARD, 30, "Generating storyboard...")
-
-                layer2_start = time.time()
-                storyboard = self.layer2.generate(
-                    pedagogical_intent=pedagogical_intent.intent
-                )
-                timings.layer2 = time.time() - layer2_start
-
-                update_progress(PipelineStage.LAYER2_STORYBOARD, 45, "Storyboard generated")
-                print(f"✓ Layer 2 complete: {timings.layer2:.1f}s")
-
-                if debug_callback:
-                    debug_callback(2, layer2_input, storyboard.model_dump(), timings.layer2, None)
-
-            except Exception as e:
-                error_stage = PipelineStage.LAYER2_STORYBOARD.value
-                error_message = f"Layer 2 failed: {str(e)}"
-                update_progress(PipelineStage.FAILED, 30, error_message, str(e))
-                print(f"✗ Layer 2 failed: {e}")
-                if debug_callback:
-                    debug_callback(2, layer2_input, None, 0, str(e))
-
-        # Continue to Layer 3 if Layer 2 succeeded
-        if storyboard:
-            layer3_input = {"storyboard": storyboard.model_dump()}
-
-            try:
-                # === Layer 3: Storyboard → Manim Prompt ===
-                update_progress(PipelineStage.LAYER3_PROMPT, 50, "Generating Manim prompt...")
-
-                layer3_start = time.time()
-                manim_prompt = self.layer3.generate(storyboard)
-
-                # Enrich with pedagogical context for Layer 4
-                manim_prompt.metadata.pedagogical_context = {
-                    "core_question": pedagogical_intent.intent.core_question,
-                    "target_mental_model": pedagogical_intent.intent.target_mental_model,
-                    "common_misconception": pedagogical_intent.intent.common_misconception,
-                    "visual_metaphor": pedagogical_intent.intent.spatial_metaphor,
-                    "key_insight": pedagogical_intent.intent.disambiguating_contrast,
-                }
-                timings.layer3 = time.time() - layer3_start
-
-                update_progress(PipelineStage.LAYER3_PROMPT, 55, "Manim prompt generated")
-                print(f"✓ Layer 3 complete: {timings.layer3:.1f}s")
-
-                if debug_callback:
-                    debug_callback(3, layer3_input, manim_prompt.model_dump(), timings.layer3, None)
-
-            except Exception as e:
-                error_stage = PipelineStage.LAYER3_PROMPT.value
-                error_message = f"Layer 3 failed: {str(e)}"
-                update_progress(PipelineStage.FAILED, 50, error_message, str(e))
-                print(f"✗ Layer 3 failed: {e}")
-                if debug_callback:
-                    debug_callback(3, layer3_input, None, 0, str(e))
-
-        # Continue to Layer 4 if Layer 3 succeeded
-        if manim_prompt:
-            layer4_input = {"manim_prompt": manim_prompt.model_dump()}
-
-            try:
-                # === Layer 4: Manim Prompt → Video ===
-                update_progress(PipelineStage.LAYER4_VIDEO, 60, "Generating and rendering video...")
-
-                layer4_start = time.time()
-                execution = self.layer4.generate(manim_prompt)
-                timings.layer4 = time.time() - layer4_start
-
-                if execution.execution_result.success:
-                    update_progress(PipelineStage.COMPLETED, 100, "Video generated successfully")
-                    print(f"✓ Layer 4 complete: {timings.layer4:.1f}s")
-                    if debug_callback:
-                        debug_callback(4, layer4_input, execution.model_dump(), timings.layer4, None)
-                else:
-                    error_stage = PipelineStage.LAYER4_VIDEO.value
-                    error_message = f"Video generation failed: {execution.execution_result.error_message}"
-                    update_progress(PipelineStage.FAILED, 90, error_message)
-                    print(f"✗ Layer 4 failed: {execution.execution_result.error_message}")
-                    if debug_callback:
-                        debug_callback(4, layer4_input, execution.model_dump(), timings.layer4, execution.execution_result.error_message)
-
-            except Exception as e:
-                error_stage = PipelineStage.LAYER4_VIDEO.value
-                error_message = f"Layer 4 failed: {str(e)}"
-                update_progress(PipelineStage.FAILED, 60, error_message, str(e))
-                print(f"✗ Layer 4 failed: {e}")
-                if debug_callback:
-                    debug_callback(4, layer4_input, None, 0, str(e))
-
         # Build response
         completed_at = datetime.now()
-        total_seconds = (completed_at - started_at).total_seconds()
 
         return self._build_response(
             job_id=job_id,
             topic=topic,
             pedagogical_intent=pedagogical_intent,
-            storyboard=storyboard,
-            execution=execution,
             generated_clips=generated_clips,
             error_stage=error_stage,
             error_message=error_message,
@@ -519,9 +360,7 @@ class FullPipelineOrchestrator:
         job_id: str,
         topic: str,
         pedagogical_intent: Optional[PedagogicalIntentWithMetadata],
-        storyboard: Optional[StoryboardWithMetadata],
-        execution: Optional[ManimExecutionWithMetadata],
-        generated_clips: list[AnimationClip],
+        generated_clips: List[AnimationClip],
         error_stage: Optional[str],
         error_message: Optional[str],
         started_at: datetime,
@@ -531,55 +370,58 @@ class FullPipelineOrchestrator:
     ) -> FullPipelineResponse:
         """Build the API response from pipeline outputs."""
 
-        # Extract pedagogical metadata
+        # Extract pedagogical metadata with sections
         pedagogy = None
         if pedagogical_intent:
             intent = pedagogical_intent.intent
+
+            # Convert sections to summaries
+            section_summaries = []
+            for section in intent.sections:
+                visual_summary = None
+                if section.visual:
+                    visual_summary = VisualHintSummary(
+                        should_animate=section.visual.should_animate,
+                        animation_description=section.visual.animation_description,
+                        duration_hint=section.visual.duration_hint
+                    )
+
+                comparison_summary = None
+                if section.comparison:
+                    comparison_summary = ComparisonSummary(
+                        item_a=section.comparison.item_a,
+                        item_b=section.comparison.item_b,
+                        difference=section.comparison.difference
+                    )
+
+                section_summaries.append(PedagogicalSectionSummary(
+                    title=section.title,
+                    content=section.content,
+                    order=section.order,
+                    visual=visual_summary,
+                    steps=section.steps,
+                    math_expressions=section.math_expressions,
+                    comparison=comparison_summary,
+                ))
+
             pedagogy = PedagogicalMetadata(
                 topic=intent.topic,
-                core_question=intent.core_question,
-                target_mental_model=intent.target_mental_model,
-                common_misconception=intent.common_misconception,
-                disambiguating_contrast=intent.disambiguating_contrast,
-                concrete_anchor=intent.concrete_anchor,
-                check_for_understanding=intent.check_for_understanding,
+                summary=intent.summary,
+                sections=section_summaries,
                 domain=intent.domain,
                 difficulty_level=intent.difficulty_level,
-                spatial_metaphor=intent.spatial_metaphor,
-            )
-
-        # Extract storyboard summary
-        storyboard_summary = None
-        if storyboard:
-            sb = storyboard.storyboard
-            storyboard_summary = StoryboardSummary(
-                topic=sb.topic,
-                pedagogical_pattern=sb.pedagogical_pattern,
-                beats=[
-                    StoryboardBeat(purpose=b.purpose, intent=b.intent)
-                    for b in sb.beats
-                ],
-            )
-
-        # Extract video metadata
-        video = None
-        has_successful_video = execution and execution.execution_result.success
-        if has_successful_video:
-            video = VideoMetadata(
-                video_url=f"{self.video_base_url}/{job_id}",
-                video_path=execution.execution_result.video_path,
-                resolution=execution.execution_result.resolution,
-                execution_time_seconds=execution.execution_result.execution_time_seconds,
-                generated_code=execution.code_response.code if include_generated_code else None,
             )
 
         # Build clip summaries
         clip_summaries = []
         for clip in generated_clips:
+            # Extract section_order from clip_id (e.g., "section_1" -> 1)
+            section_order = int(clip.clip_id.split("_")[1]) if "_" in clip.clip_id else 0
+
             clip_summaries.append(AnimationClipSummary(
                 clip_id=clip.clip_id,
-                concept=clip.concept,
-                placement=clip.placement,
+                section_order=section_order,
+                section_title=clip.concept,
                 video_url=f"{self.video_base_url}/clip/{job_id}/{clip.clip_id}" if clip.success else None,
                 video_path=clip.video_path,
                 duration_seconds=clip.duration_seconds,
@@ -587,19 +429,17 @@ class FullPipelineOrchestrator:
                 error_message=clip.error_message,
             ))
 
-        # Success if we have either a video OR successful clips
+        # Success if we have pedagogical intent (clips are optional)
         has_successful_clips = any(c.success for c in generated_clips)
-        success = has_successful_video or has_successful_clips
+        success = pedagogical_intent is not None
 
         # Build timing breakdown
         total_seconds = (completed_at - started_at).total_seconds()
         timing = TimingBreakdown(
             total_seconds=total_seconds,
             layer1_seconds=timings.layer1,
-            layer2_seconds=timings.layer2,
             layer3_seconds=timings.layer3,
             layer4_seconds=timings.layer4,
-            visual_planning_seconds=timings.visual_planning,
             clip_generation_seconds=timings.clip_generation,
         )
 
@@ -609,9 +449,8 @@ class FullPipelineOrchestrator:
             success=success,
             error_stage=error_stage,
             error_message=error_message,
-            video=video,
+            video=None,  # No single video in new architecture
             pedagogy=pedagogy,
-            storyboard=storyboard_summary,
             clips=clip_summaries,
             started_at=started_at.isoformat(),
             completed_at=completed_at.isoformat(),
@@ -719,8 +558,8 @@ def main():
     print(f"{'='*60}")
     print(f"Success: {result.success}")
     print(f"Total time: {result.timing.total_seconds:.1f}s")
-    if result.video:
-        print(f"Video: {result.video.video_path}")
+    print(f"Sections: {len(result.pedagogy.sections) if result.pedagogy else 0}")
+    print(f"Clips: {len(result.clips)} ({sum(1 for c in result.clips if c.success)} successful)")
     if result.error_message:
         print(f"Error: {result.error_message}")
 

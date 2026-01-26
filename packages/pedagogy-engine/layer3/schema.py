@@ -39,12 +39,13 @@ class ManimPromptMetadata(BaseModel):
     """
 
     generator_version: str = "0.1.0"
-    source_storyboard_topic: str
-    pedagogical_pattern: Optional[str]
+    source_storyboard_topic: str  # Topic name from Layer 1
+    pedagogical_pattern: Optional[str] = None
     generation_timestamp: str
-    source_layer2_id: Optional[str] = None
+    source_layer2_id: Optional[str] = None  # Section ID (e.g., "section_1")
+    source_visual_section: Optional[str] = None  # Section title that has the visual
 
-    # NEW: Pedagogical context (optional for backwards compatibility)
+    # Pedagogical context (optional)
     pedagogical_context: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Pedagogical reasoning and educational goals for this visualization"

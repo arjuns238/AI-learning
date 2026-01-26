@@ -2,6 +2,7 @@
 Pydantic models for the Full Pipeline Orchestrator.
 
 Defines request/response schemas for the end-to-end pipeline API.
+Uses the new flexible section-based structure (no layer2/visual_planner).
 """
 
 from typing import Optional, List, Dict, Any
@@ -13,8 +14,6 @@ class PipelineStage(str, Enum):
     """Pipeline execution stages for progress tracking."""
     PENDING = "pending"
     LAYER1_INTENT = "generating_pedagogical_intent"
-    LAYER2_STORYBOARD = "generating_storyboard"
-    VISUAL_PLANNING = "identifying_visual_opportunities"
     LAYER3_PROMPT = "generating_manim_prompt"
     LAYER4_VIDEO = "generating_video"
     GENERATING_CLIPS = "generating_animation_clips"
@@ -33,33 +32,40 @@ class PipelineProgress(BaseModel):
     error: Optional[str] = None
 
 
-# --- Response Models ---
+# --- Section-based Response Models ---
+
+class VisualHintSummary(BaseModel):
+    """Visual hint summary for API response."""
+    should_animate: bool
+    animation_description: Optional[str] = None
+    duration_hint: Optional[int] = None
+
+
+class ComparisonSummary(BaseModel):
+    """Comparison data for API response."""
+    item_a: str
+    item_b: str
+    difference: str
+
+
+class PedagogicalSectionSummary(BaseModel):
+    """Section summary for API response."""
+    title: str
+    content: str
+    order: int
+    visual: Optional[VisualHintSummary] = None
+    steps: Optional[List[str]] = None
+    math_expressions: Optional[List[str]] = None
+    comparison: Optional[ComparisonSummary] = None
+
 
 class PedagogicalMetadata(BaseModel):
-    """Pedagogical metadata extracted for display."""
+    """Pedagogical metadata extracted for display - flexible section-based."""
     topic: str
-    core_question: str
-    target_mental_model: str
-    common_misconception: str
-    disambiguating_contrast: str
-    concrete_anchor: str
-    check_for_understanding: str
+    summary: str
+    sections: List[PedagogicalSectionSummary]
     domain: Optional[str] = None
     difficulty_level: Optional[int] = None
-    spatial_metaphor: Optional[str] = None
-
-
-class StoryboardBeat(BaseModel):
-    """Single beat from storyboard."""
-    purpose: str
-    intent: str
-
-
-class StoryboardSummary(BaseModel):
-    """Storyboard data for display."""
-    topic: str
-    pedagogical_pattern: Optional[str]
-    beats: List[StoryboardBeat]
 
 
 class VideoMetadata(BaseModel):
@@ -74,8 +80,8 @@ class VideoMetadata(BaseModel):
 class AnimationClipSummary(BaseModel):
     """Summary of a generated animation clip for API response."""
     clip_id: str
-    concept: str
-    placement: str  # core_mechanism, misconception, example, contrast
+    section_order: int  # Which section this clip belongs to
+    section_title: str
     video_url: Optional[str] = None
     video_path: Optional[str] = None
     duration_seconds: float = 0.0
@@ -87,10 +93,8 @@ class TimingBreakdown(BaseModel):
     """Timing breakdown by layer."""
     total_seconds: float
     layer1_seconds: float = 0.0
-    layer2_seconds: float = 0.0
     layer3_seconds: float = 0.0
     layer4_seconds: float = 0.0
-    visual_planning_seconds: float = 0.0
     clip_generation_seconds: float = 0.0
 
 
@@ -109,12 +113,11 @@ class FullPipelineResponse(BaseModel):
     # Primary outputs
     video: Optional[VideoMetadata] = None
     pedagogy: Optional[PedagogicalMetadata] = None
-    storyboard: Optional[StoryboardSummary] = None
 
-    # Animation clips (Phase 2 - multiple short clips)
+    # Animation clips for sections with visuals
     clips: List[AnimationClipSummary] = Field(
         default_factory=list,
-        description="Short animation clips for specific concepts"
+        description="Animation clips for sections with visual hints"
     )
 
     # Timing

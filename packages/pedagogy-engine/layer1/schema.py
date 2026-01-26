@@ -1,20 +1,114 @@
 """
-Pydantic models for Layer 1: Pedagogical Intent Schema
+Pydantic models for Layer 1: Flexible Pedagogical Intent Schema
 
-Defines the structure of pedagogical intent outputs and validation rules.
+Defines the structure for dynamic, freeform pedagogical sections
+with embedded visual hints.
 """
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field, field_validator
-import re
+import json
+
+
+class VisualHint(BaseModel):
+    """
+    Embedded visual opportunity for a section.
+
+    LLM identifies this while generating content - no separate visual planning step.
+    """
+
+    should_animate: bool = Field(
+        ...,
+        description="Whether this section would benefit from animation"
+    )
+
+    animation_description: Optional[str] = Field(
+        None,
+        description="If should_animate is True, describe what to show (2-3 sentences). "
+                    "Be specific about visual elements, motion, and timing.",
+        min_length=20
+    )
+
+    duration_hint: Optional[int] = Field(
+        None,
+        description="Suggested animation duration in seconds (10-30)",
+        ge=5,
+        le=60
+    )
+
+    @field_validator('animation_description')
+    @classmethod
+    def require_description_if_animate(cls, v, info):
+        """Ensure description is provided when should_animate is True."""
+        # Note: This runs before the full model is validated
+        # The cross-field validation happens in model_validator
+        return v
+
+
+class Comparison(BaseModel):
+    """Structured comparison for disambiguation sections."""
+
+    item_a: str = Field(..., description="First item being compared")
+    item_b: str = Field(..., description="Second item being compared")
+    difference: str = Field(..., description="Key difference between them")
+
+
+class PedagogicalSection(BaseModel):
+    """
+    A single freeform pedagogical section.
+
+    The LLM generates section titles and content dynamically based on
+    what the topic actually needs - no predefined section types.
+    """
+
+    title: str = Field(
+        ...,
+        description="LLM-generated title for this section (e.g., 'The Core Intuition', "
+                    "'A Common Trap', 'Step by Step')",
+        min_length=3,
+        max_length=100
+    )
+
+    content: str = Field(
+        ...,
+        description="The pedagogical content of this section. Markdown supported.",
+        min_length=20
+    )
+
+    order: int = Field(
+        ...,
+        description="Display order (1-based, sequential)",
+        ge=1
+    )
+
+    visual: Optional[VisualHint] = Field(
+        None,
+        description="Visual opportunity embedded in this section, if applicable"
+    )
+
+    # Optional structured content - LLM uses when appropriate
+    steps: Optional[List[str]] = Field(
+        None,
+        description="For procedural content: ordered list of steps"
+    )
+
+    math_expressions: Optional[List[str]] = Field(
+        None,
+        description="For mathematical content: LaTeX expressions"
+    )
+
+    comparison: Optional[Comparison] = Field(
+        None,
+        description="For disambiguation: structured comparison of two items"
+    )
 
 
 class PedagogicalIntent(BaseModel):
     """
-    Structured representation of pedagogical intent for a topic.
+    Flexible pedagogical intent schema.
 
-    This schema captures the key elements needed to teach a concept effectively,
-    separating pedagogical reasoning from visualization concerns.
+    Uses dynamic, freeform sections instead of rigid fields.
+    The LLM decides which sections are needed for each topic.
     """
 
     topic: str = Field(
@@ -23,46 +117,18 @@ class PedagogicalIntent(BaseModel):
         min_length=3
     )
 
-    core_question: str = Field(
+    summary: str = Field(
         ...,
-        description="The fundamental question the learner is trying to answer. "
-                    "Should capture actual learner confusion, not textbook definition.",
-        min_length=10
+        description="1-2 sentence overview of the lesson",
+        min_length=20,
+        max_length=500
     )
 
-    target_mental_model: str = Field(
+    sections: List[PedagogicalSection] = Field(
         ...,
-        description="The conceptual framework the learner should build. "
-                    "Should be a clear, specific mental model.",
-        min_length=20
-    )
-
-    common_misconception: str = Field(
-        ...,
-        description="A typical wrong understanding that learners hold. "
-                    "Should be common (not obscure) and specific.",
-        min_length=10
-    )
-
-    disambiguating_contrast: str = Field(
-        ...,
-        description="A comparison that clarifies the concept by highlighting "
-                    "a key difference. Should compare two distinct concepts.",
-        min_length=10
-    )
-
-    concrete_anchor: str = Field(
-        ...,
-        description="A specific, grounded example that makes the concept tangible. "
-                    "Should be manipulable/visualizable and relatable.",
-        min_length=10
-    )
-
-    check_for_understanding: str = Field(
-        ...,
-        description="A question to verify the learner has grasped the concept. "
-                    "Should test understanding, not rote memorization.",
-        min_length=10
+        description="Dynamic list of pedagogical sections (2-8 sections)",
+        min_length=2,
+        max_length=8
     )
 
     # Optional metadata
@@ -78,15 +144,25 @@ class PedagogicalIntent(BaseModel):
         le=5
     )
 
-    spatial_metaphor: Optional[str] = Field(
-        None,
-        description="Optional hint for visualization (forward compatibility with Layer 2/3)"
-    )
+    @field_validator('sections')
+    @classmethod
+    def validate_section_order(cls, sections: List[PedagogicalSection]) -> List[PedagogicalSection]:
+        """Ensure section orders are sequential starting from 1."""
+        orders = sorted([s.order for s in sections])
+        expected = list(range(1, len(sections) + 1))
+        if orders != expected:
+            raise ValueError(f"Section orders must be sequential 1..n, got {orders}")
+        return sections
 
+    def get_visual_sections(self) -> List[PedagogicalSection]:
+        """Extract sections that need video generation."""
+        return [
+            section for section in self.sections
+            if section.visual and section.visual.should_animate
+        ]
 
     def model_dump_json_formatted(self) -> str:
         """Return pretty-printed JSON representation."""
-        import json
         return json.dumps(self.model_dump(), indent=2)
 
 
@@ -95,9 +171,8 @@ class GenerationMetadata(BaseModel):
 
     model_name: str = Field(..., description="Name of the model used for generation")
     temperature: float = Field(..., description="Temperature parameter used")
-    exemplar_ids: list[str] = Field(default_factory=list, description="IDs of exemplars used")
     generation_timestamp: str = Field(..., description="ISO timestamp of generation")
-    version: str = Field(default="0.1.0", description="Schema version")
+    version: str = Field(default="1.0.0", description="Schema version")
 
 
 class PedagogicalIntentWithMetadata(BaseModel):
@@ -117,35 +192,78 @@ class PedagogicalIntentWithMetadata(BaseModel):
 
 # Example instance for testing
 EXAMPLE_PEDAGOGICAL_INTENT = PedagogicalIntent(
-    topic="Bias-Variance Tradeoff",
+    topic="Gradient Descent",
+    summary="How an algorithm finds optimal parameters by iteratively following the steepest path downhill.",
     domain="machine_learning",
     difficulty_level=3,
-    core_question="Why does my model perform well on training data but poorly on new data?",
-    target_mental_model=(
-        "Model complexity is a spectrum with two failure modes: oversimplification "
-        "(high bias) misses patterns, while overfitting (high variance) memorizes noise. "
-        "The goal is finding the sweet spot between them."
-    ),
-    common_misconception=(
-        "More model complexity always leads to better predictions, since it captures "
-        "more patterns in the data."
-    ),
-    disambiguating_contrast=(
-        "A straight line (simple) vs a wiggly curve through every point (complex): "
-        "the line misses some training points but generalizes better to new data, "
-        "while the curve fits training perfectly but fails on new points."
-    ),
-    concrete_anchor=(
-        "Imagine predicting house prices: a model that only uses 'number of bedrooms' "
-        "(underfits) vs one that memorizes every house's unique scratches and stains "
-        "(overfits). Neither works for new houses."
-    ),
-    check_for_understanding=(
-        "You train two models on 100 data points. Model A gets 95% training accuracy, "
-        "60% test accuracy. Model B gets 75% training accuracy, 72% test accuracy. "
-        "Which likely has better bias-variance balance and why?"
-    ),
-    spatial_metaphor="U-shaped curve showing error vs model complexity"
+    sections=[
+        PedagogicalSection(
+            title="The Core Intuition",
+            content=(
+                "Imagine you're lost in dense fog on a mountainside, trying to reach the valley floor. "
+                "You can't see the whole landscape, but you can feel which direction slopes downward "
+                "beneath your feet. By repeatedly taking small steps in the steepest downward direction, "
+                "you eventually reach a valley - even without a map of the entire terrain."
+            ),
+            order=1,
+            visual=VisualHint(
+                should_animate=True,
+                animation_description=(
+                    "Show a ball on a 3D curved surface (loss landscape). "
+                    "At each position, draw a gradient arrow pointing downhill. "
+                    "The ball takes a step in that direction, leaving a trail. "
+                    "Repeat until it settles into a valley (local minimum)."
+                ),
+                duration_hint=15
+            )
+        ),
+        PedagogicalSection(
+            title="The Algorithm Step-by-Step",
+            content=(
+                "Gradient descent follows a simple procedure that repeats until convergence. "
+                "Each iteration moves the parameters slightly in the direction that reduces the error most."
+            ),
+            order=2,
+            steps=[
+                "Compute the gradient (slope) at the current position",
+                "Take a step in the negative gradient direction (downhill)",
+                "Repeat until the gradient is nearly zero (reached a minimum)"
+            ],
+            visual=None
+        ),
+        PedagogicalSection(
+            title="The Learning Rate Trap",
+            content=(
+                "A common mistake is setting the learning rate (step size) incorrectly. "
+                "Too small and you'll take forever to converge. Too large and you'll overshoot "
+                "the minimum, potentially bouncing around forever or even diverging."
+            ),
+            order=3,
+            visual=VisualHint(
+                should_animate=True,
+                animation_description=(
+                    "Split screen comparison: Left side shows small learning rate - ball slowly "
+                    "rolling downhill, taking many tiny steps. Right side shows large learning rate - "
+                    "ball overshooting, oscillating wildly around the minimum, never settling."
+                ),
+                duration_hint=12
+            ),
+            comparison=Comparison(
+                item_a="Small learning rate",
+                item_b="Large learning rate",
+                difference="Small is slow but stable; large is fast but may never converge"
+            )
+        ),
+        PedagogicalSection(
+            title="Check Your Understanding",
+            content=(
+                "You run gradient descent and it converges to a point, but the loss is still "
+                "relatively high. What might have happened, and what could you try differently?"
+            ),
+            order=4,
+            visual=None
+        )
+    ]
 )
 
 
@@ -153,4 +271,7 @@ if __name__ == "__main__":
     # Test the schema
     print("Testing PedagogicalIntent schema...")
     print(EXAMPLE_PEDAGOGICAL_INTENT.model_dump_json_formatted())
-    print("\n✓ Schema validation passed!")
+
+    print(f"\n✓ Schema validation passed!")
+    print(f"  - {len(EXAMPLE_PEDAGOGICAL_INTENT.sections)} sections")
+    print(f"  - {len(EXAMPLE_PEDAGOGICAL_INTENT.get_visual_sections())} sections with visuals")

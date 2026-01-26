@@ -1,7 +1,7 @@
 """
 Layer 1 Generator: Topic → Pedagogical Intent
 
-Generates structured pedagogical intent using prompt engineering + few-shot exemplars.
+Generates structured pedagogical content with dynamic sections and embedded visual hints.
 Supports both OpenAI and Anthropic APIs.
 """
 
@@ -12,7 +12,14 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
 
-from layer1.schema import PedagogicalIntent, GenerationMetadata, PedagogicalIntentWithMetadata
+from layer1.schema import (
+    PedagogicalIntent,
+    PedagogicalIntentWithMetadata,
+    GenerationMetadata,
+    PedagogicalSection,
+    VisualHint,
+    Comparison
+)
 
 # Load environment variables
 load_dotenv()
@@ -23,14 +30,13 @@ _PEDAGOGY_ENGINE_ROOT = _LAYER1_DIR.parent
 
 
 class PedagogicalIntentGenerator:
-    """Generates pedagogical intent from topics using LLM + exemplars."""
+    """Generates pedagogical intent from topics using LLM."""
 
     def __init__(
         self,
         model_name: Optional[str] = None,
         temperature: float = 0.7,
         api_provider: Optional[str] = None,
-        exemplar_path: Optional[str] = None,
         prompt_template_path: Optional[str] = None
     ):
         # Determine API provider and model
@@ -41,24 +47,15 @@ class PedagogicalIntentGenerator:
             model_name = os.getenv("DEFAULT_MODEL")
             if model_name is None:
                 # Default models by provider
-                model_name = "gpt-4o-mini" if self.api_provider == "openai" else "claude-opus-4-5"
+                model_name = "gpt-4o-mini" if self.api_provider == "openai" else "claude-sonnet-4-20250514"
 
         self.model_name = model_name
         self.temperature = temperature
 
-        # Resolve paths - use absolute paths relative to package root if not provided
-        if exemplar_path is None:
-            self.exemplar_path = str(_PEDAGOGY_ENGINE_ROOT / "data" / "exemplars.json")
-        elif not Path(exemplar_path).is_absolute():
-            # If relative path provided, resolve relative to package root
-            self.exemplar_path = str(_PEDAGOGY_ENGINE_ROOT / exemplar_path)
-        else:
-            self.exemplar_path = exemplar_path
-
+        # Resolve prompt template path
         if prompt_template_path is None:
             self.prompt_template_path = str(_PEDAGOGY_ENGINE_ROOT / "prompts" / "pedagogical_intent.txt")
         elif not Path(prompt_template_path).is_absolute():
-            # If relative path provided, resolve relative to package root
             self.prompt_template_path = str(_PEDAGOGY_ENGINE_ROOT / prompt_template_path)
         else:
             self.prompt_template_path = prompt_template_path
@@ -73,9 +70,6 @@ class PedagogicalIntentGenerator:
                 f"Unknown API provider: {self.api_provider}. "
                 "Must be 'openai' or 'anthropic'"
             )
-
-        # Load exemplars
-        self.exemplars = self._load_exemplars()
 
         # Load prompt template
         self.prompt_template = self._load_prompt_template()
@@ -118,21 +112,6 @@ class PedagogicalIntentGenerator:
         self.client = anthropic.Anthropic(api_key=api_key)
         print(f"Initialized Anthropic client with model: {self.model_name}")
 
-    def _load_exemplars(self) -> List[Dict[str, Any]]:
-        """Load exemplars from JSON file."""
-        exemplar_file = Path(self.exemplar_path)
-
-        if not exemplar_file.exists():
-            raise FileNotFoundError(f"Exemplar file not found: {exemplar_file}")
-
-        with open(exemplar_file, 'r') as f:
-            data = json.load(f)
-
-        exemplars = data.get('exemplars', [])
-        print(f"Loaded {len(exemplars)} exemplars from {exemplar_file}")
-
-        return exemplars
-
     def _load_prompt_template(self) -> str:
         """Load prompt template from file."""
         template_file = Path(self.prompt_template_path)
@@ -145,46 +124,9 @@ class PedagogicalIntentGenerator:
 
         return template
 
-    def _format_exemplars(self, exemplars: List[Dict[str, Any]]) -> str:
-        """Format exemplars for inclusion in prompt."""
-        formatted = []
-
-        for ex in exemplars:
-            # Extract just the pedagogical intent fields
-            intent_fields = {
-                'topic': ex.get('topic'),
-                'domain': ex.get('domain'),
-                'difficulty_level': ex.get('difficulty_level'),
-                'core_question': ex.get('core_question'),
-                'target_mental_model': ex.get('target_mental_model'),
-                'common_misconception': ex.get('common_misconception'),
-                'disambiguating_contrast': ex.get('disambiguating_contrast'),
-                'concrete_anchor': ex.get('concrete_anchor'),
-                'check_for_understanding': ex.get('check_for_understanding'),
-                'spatial_metaphor': ex.get('spatial_metaphor')
-            }
-
-            formatted.append(json.dumps(intent_fields, indent=2))
-
-        return "\n\n".join(formatted)
-
-    def _build_prompt(self, topic: str, num_exemplars: int = 3) -> str:
-        """Build the full prompt with exemplars."""
-
-        # Select exemplars (use all if fewer than requested)
-        selected_exemplars = self.exemplars[:min(num_exemplars, len(self.exemplars))]
-
-        # Format exemplars
-        exemplar_text = self._format_exemplars(selected_exemplars)
-
-        # Insert into template
-        prompt = self.prompt_template.replace(
-            "{EXEMPLARS_WILL_BE_INSERTED_HERE}",
-            exemplar_text
-        )
-        prompt = prompt.replace("{TOPIC}", topic)
-
-        return prompt
+    def _build_prompt(self, topic: str) -> str:
+        """Build the full prompt."""
+        return self.prompt_template.replace("{TOPIC}", topic)
 
     def _call_openai(self, prompt: str) -> str:
         """Call OpenAI API."""
@@ -224,12 +166,28 @@ class PedagogicalIntentGenerator:
         else:
             raise ValueError(f"Unknown API provider: {self.api_provider}")
 
+    def _parse_response(self, response_text: str) -> Dict[str, Any]:
+        """Parse JSON from LLM response, handling markdown code blocks."""
+        json_text = response_text
+
+        # Handle markdown code blocks
+        if "```json" in response_text:
+            json_text = response_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in response_text:
+            json_text = response_text.split("```")[1].split("```")[0].strip()
+
+        try:
+            return json.loads(json_text)
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse JSON from response: {e}")
+            print(f"Response: {response_text[:500]}...")
+            raise
+
     def generate(
         self,
         topic: str,
         domain: Optional[str] = None,
-        difficulty_level: Optional[int] = None,
-        num_exemplars: int = 3
+        difficulty_level: Optional[int] = None
     ) -> PedagogicalIntentWithMetadata:
         """
         Generate pedagogical intent for a topic.
@@ -238,36 +196,19 @@ class PedagogicalIntentGenerator:
             topic: The topic to generate pedagogy for
             domain: Optional domain hint (e.g., 'machine_learning')
             difficulty_level: Optional difficulty hint (1-5)
-            num_exemplars: Number of exemplars to include in prompt
 
         Returns:
-            PedagogicalIntentWithMetadata with the generated intent and metadata
+            PedagogicalIntentWithMetadata with dynamic sections
         """
-
         print(f"\nGenerating pedagogical intent for: {topic}")
         print(f"Provider: {self.api_provider}, Model: {self.model_name}, Temperature: {self.temperature}")
-        print(f"Using {num_exemplars} exemplars")
 
-        # Build prompt
-        prompt = self._build_prompt(topic, num_exemplars)
-
-        # Call API
+        # Build and call
+        prompt = self._build_prompt(topic)
         response_text = self._call_api(prompt)
 
-        # Try to find JSON in response (may be wrapped in markdown code blocks)
-        json_text = response_text
-        if "```json" in response_text:
-            json_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            json_text = response_text.split("```")[1].split("```")[0].strip()
-
-        # Parse JSON
-        try:
-            intent_data = json.loads(json_text)
-        except json.JSONDecodeError as e:
-            print(f"Failed to parse JSON from response: {e}")
-            print(f"Response: {response_text[:500]}...")
-            raise
+        # Parse response
+        intent_data = self._parse_response(response_text)
 
         # Create PedagogicalIntent (validates schema)
         intent = PedagogicalIntent(**intent_data)
@@ -276,7 +217,6 @@ class PedagogicalIntentGenerator:
         metadata = GenerationMetadata(
             model_name=self.model_name,
             temperature=self.temperature,
-            exemplar_ids=[ex.get('id', 'unknown') for ex in self.exemplars[:num_exemplars]],
             generation_timestamp=datetime.now().isoformat()
         )
 
@@ -284,11 +224,15 @@ class PedagogicalIntentGenerator:
         result = PedagogicalIntentWithMetadata(
             intent=intent,
             metadata=metadata,
-            quality_scores=None,  # Will be filled by evaluator
-            needs_review=True      # Always needs review initially
+            quality_scores=None,
+            needs_review=True
         )
 
+        # Summary
+        visual_count = len(intent.get_visual_sections())
         print(f"✓ Generated pedagogical intent for: {intent.topic}")
+        print(f"  - {len(intent.sections)} sections")
+        print(f"  - {visual_count} sections with visual opportunities")
 
         return result
 
@@ -298,7 +242,6 @@ class PedagogicalIntentGenerator:
         output_dir: str = "output/generated"
     ) -> List[PedagogicalIntentWithMetadata]:
         """Generate pedagogical intent for multiple topics."""
-
         results = []
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -374,12 +317,6 @@ def main():
         default=0.7,
         help="Temperature for generation"
     )
-    parser.add_argument(
-        '--num-exemplars',
-        type=int,
-        default=3,
-        help="Number of exemplars to use"
-    )
 
     args = parser.parse_args()
 
@@ -405,7 +342,7 @@ def main():
 
     # Generate
     if len(topics) == 1:
-        result = generator.generate(topics[0], num_exemplars=args.num_exemplars)
+        result = generator.generate(topics[0])
 
         # Print result
         print(f"\n{'='*60}")
