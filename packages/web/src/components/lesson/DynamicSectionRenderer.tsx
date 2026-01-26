@@ -2,6 +2,7 @@
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { MathExpression } from "@/components/math/MathExpression";
 import type {
   PedagogicalSection,
   AnimationClipSummary,
@@ -28,11 +29,10 @@ function StepsList({ steps }: { steps: string[] }) {
 
 function MathBlock({ expressions }: { expressions: string[] }) {
   return (
-    <div className="mt-4 space-y-3 bg-slate-50 rounded-lg p-4 font-mono text-sm">
+    <div className="mt-4 space-y-3 bg-slate-50 rounded-lg p-4">
       {expressions.map((expr, index) => (
-        <div key={index} className="text-center text-slate-800 overflow-x-auto">
-          {/* For now, just display the LaTeX as-is. Can integrate KaTeX/MathJax later */}
-          <code className="text-base">{expr}</code>
+        <div key={index} className="overflow-x-auto">
+          <MathExpression expression={expr} display={true} />
         </div>
       ))}
     </div>

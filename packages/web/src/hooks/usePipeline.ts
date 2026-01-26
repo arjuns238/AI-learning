@@ -52,47 +52,6 @@ export function usePipeline() {
   }, [clearPolling]);
 
   /**
-   * Generate content using the synchronous endpoint.
-   * Blocks until complete - best for quick topics.
-   */
-  const generateSync = useCallback(async (request: FullPipelineRequest) => {
-    reset();
-    setState((prev) => ({ ...prev, isLoading: true }));
-
-    try {
-      const response = await fetch(`${API_BASE}/api/pipeline/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `HTTP ${response.status}`);
-      }
-
-      const result: FullPipelineResponse = await response.json();
-
-      setState({
-        isLoading: false,
-        progress: null,
-        result,
-        error: result.error_message || null,
-      });
-
-      return result;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error";
-      setState((prev) => ({
-        ...prev,
-        isLoading: false,
-        error: errorMessage,
-      }));
-      throw err;
-    }
-  }, [reset]);
-
-  /**
    * Generate content using the async endpoint with polling.
    * Better for long-running operations with progress updates.
    */
@@ -202,7 +161,6 @@ export function usePipeline() {
   return {
     ...state,
     generate,
-    generateSync,
     generateAsync,
     reset,
   };

@@ -1,17 +1,14 @@
 """
-Lessons endpoints - convert pedagogical intent to lesson format for web app
-Includes enhanced quiz generation and contextual Q&A
+Lessons endpoints - contextual Q&A for lessons
 """
 
 import json
 import os
-from typing import Optional, List, Literal
+from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
-
-from layer1.schema import PedagogicalIntent
 
 # Load environment variables
 load_dotenv()
@@ -20,55 +17,7 @@ router = APIRouter()
 
 
 # ============================================
-# Original Lesson Types (kept for compatibility)
-# ============================================
-
-class LessonVisual(BaseModel):
-    type: Literal["plot", "diagram", "table", "attention_heatmap"]
-    spec: dict
-
-
-class Quiz(BaseModel):
-    question: str
-    options: List[str]
-    correct_answer_index: int
-    explanation: str
-
-
-class Lesson(BaseModel):
-    title: str
-    intuition: str
-    concrete_example: str
-    common_confusion: str
-    visual: LessonVisual
-    quiz: Quiz
-
-
-# ============================================
-# Enhanced Quiz Types (Phase 1)
-# ============================================
-
-class QuizOption(BaseModel):
-    text: str
-    is_correct: bool
-    misconception_hint: Optional[str] = None
-
-
-class QuizQuestion(BaseModel):
-    id: str
-    question: str
-    options: List[QuizOption]
-    explanation: str
-    related_beat_index: Optional[int] = None
-
-
-class EnhancedQuiz(BaseModel):
-    questions: List[QuizQuestion]
-    passing_score: int = 2
-
-
-# ============================================
-# Q&A Types (Phase 1)
+# Q&A Types
 # ============================================
 
 class QARequest(BaseModel):
@@ -148,144 +97,6 @@ def call_llm(prompt: str, system: str = "") -> str:
             messages=[{"role": "user", "content": prompt}]
         )
         return response.content[0].text
-
-
-# ============================================
-# Quiz Generator
-# ============================================
-
-class QuizGenerator:
-    """Generates enhanced quizzes from pedagogical intent."""
-
-    @staticmethod
-    def generate(intent: PedagogicalIntent, num_questions: int = 3) -> EnhancedQuiz:
-        """
-        Generate an enhanced quiz with multiple questions and adaptive hints.
-
-        Uses the pedagogical intent to create questions that test understanding
-        and provide targeted feedback based on common misconceptions.
-        """
-
-        system_prompt = """You are an expert educational assessment designer.
-Generate quiz questions that test deep understanding, not just recall.
-Each wrong answer should represent a common misconception or error.
-Provide helpful hints that guide learners toward the correct understanding."""
-
-        user_prompt = f"""Create {num_questions} multiple choice questions to test understanding of: {intent.topic}
-
-Context:
-- Core Question: {intent.core_question}
-- Key Mental Model: {intent.target_mental_model}
-- Common Misconception: {intent.common_misconception}
-- Key Distinction: {intent.disambiguating_contrast}
-- Concrete Example: {intent.concrete_anchor}
-- Check for Understanding: {intent.check_for_understanding}
-
-For each question, provide:
-1. A clear question that tests understanding (not just recall)
-2. Four options (A, B, C, D) where:
-   - One is correct
-   - Others represent plausible misconceptions
-3. For each wrong option, a "misconception_hint" explaining why it's wrong and guiding toward correct understanding
-4. An explanation for the correct answer
-
-Return as JSON with this exact structure:
-{{
-  "questions": [
-    {{
-      "id": "q1",
-      "question": "The question text",
-      "options": [
-        {{"text": "Option A text", "is_correct": true}},
-        {{"text": "Option B text", "is_correct": false, "misconception_hint": "Why this is wrong..."}},
-        {{"text": "Option C text", "is_correct": false, "misconception_hint": "Why this is wrong..."}},
-        {{"text": "Option D text", "is_correct": false, "misconception_hint": "Why this is wrong..."}}
-      ],
-      "explanation": "Why the correct answer is correct"
-    }}
-  ]
-}}
-
-Make sure:
-- Questions progress from basic to more nuanced understanding
-- At least one question addresses the common misconception directly
-- Hints are educational, not just "this is wrong"
-"""
-
-        try:
-            response = call_llm(user_prompt, system_prompt)
-
-            # Parse JSON from response
-            json_text = response
-            if "```json" in response:
-                json_text = response.split("```json")[1].split("```")[0].strip()
-            elif "```" in response:
-                json_text = response.split("```")[1].split("```")[0].strip()
-
-            data = json.loads(json_text)
-
-            # Convert to QuizQuestion objects
-            questions = []
-            for q in data.get("questions", []):
-                options = [
-                    QuizOption(
-                        text=opt["text"],
-                        is_correct=opt.get("is_correct", False),
-                        misconception_hint=opt.get("misconception_hint")
-                    )
-                    for opt in q.get("options", [])
-                ]
-                questions.append(QuizQuestion(
-                    id=q.get("id", f"q{len(questions)+1}"),
-                    question=q["question"],
-                    options=options,
-                    explanation=q.get("explanation", "")
-                ))
-
-            return EnhancedQuiz(
-                questions=questions,
-                passing_score=max(1, len(questions) - 1)
-            )
-
-        except Exception as e:
-            print(f"Quiz generation failed: {e}")
-            # Fallback to basic quiz from intent
-            return QuizGenerator._fallback_quiz(intent)
-
-    @staticmethod
-    def _fallback_quiz(intent: PedagogicalIntent) -> EnhancedQuiz:
-        """Generate a basic quiz without LLM (fallback)."""
-        return EnhancedQuiz(
-            questions=[
-                QuizQuestion(
-                    id="q1",
-                    question=intent.check_for_understanding,
-                    options=[
-                        QuizOption(
-                            text=intent.target_mental_model.split(".")[0] + ".",
-                            is_correct=True
-                        ),
-                        QuizOption(
-                            text=intent.common_misconception,
-                            is_correct=False,
-                            misconception_hint=f"This is a common misconception. {intent.disambiguating_contrast}"
-                        ),
-                        QuizOption(
-                            text="None of the above applies.",
-                            is_correct=False,
-                            misconception_hint="The concept does have clear applications."
-                        ),
-                        QuizOption(
-                            text="All options are equally valid.",
-                            is_correct=False,
-                            misconception_hint="One answer is more accurate than the others."
-                        ),
-                    ],
-                    explanation=intent.target_mental_model
-                )
-            ],
-            passing_score=1
-        )
 
 
 # ============================================
@@ -374,82 +185,8 @@ Return as JSON:
 
 
 # ============================================
-# Helper Functions
-# ============================================
-
-def pedagogical_intent_to_lesson(intent: PedagogicalIntent) -> Lesson:
-    """
-    Convert PedagogicalIntent to Lesson format.
-    """
-    visual = LessonVisual(
-        type="diagram",
-        spec={
-            "title": f"{intent.topic} - Visualization",
-            "mermaid": "graph LR\n    A[Concept] --> B[Understanding]"
-        }
-    )
-
-    quiz = Quiz(
-        question=intent.check_for_understanding,
-        options=[
-            "Option A - To be generated",
-            "Option B - To be generated",
-            "Option C - To be generated",
-            "Option D - To be generated"
-        ],
-        correct_answer_index=0,
-        explanation="Explanation to be generated based on the answer"
-    )
-
-    return Lesson(
-        title=intent.topic,
-        intuition=intent.target_mental_model,
-        concrete_example=intent.concrete_anchor,
-        common_confusion=intent.common_misconception,
-        visual=visual,
-        quiz=quiz
-    )
-
-
-def store_lesson_context(lesson_id: str, intent: PedagogicalIntent):
-    """Store lesson context for Q&A."""
-    _lesson_contexts[lesson_id] = LessonContext(
-        topic=intent.topic,
-        core_question=intent.core_question,
-        target_mental_model=intent.target_mental_model,
-        common_misconception=intent.common_misconception,
-        disambiguating_contrast=intent.disambiguating_contrast,
-        concrete_anchor=intent.concrete_anchor
-    )
-
-
-# ============================================
 # API Endpoints
 # ============================================
-
-@router.post("/from-intent", response_model=Lesson)
-async def create_lesson_from_intent(intent: PedagogicalIntent):
-    """
-    Convert a PedagogicalIntent to Lesson format for the web app.
-    """
-    try:
-        lesson = pedagogical_intent_to_lesson(intent)
-        return lesson
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/quiz/generate", response_model=EnhancedQuiz)
-async def generate_quiz(intent: PedagogicalIntent, num_questions: int = 3):
-    """
-    Generate an enhanced quiz from pedagogical intent.
-    """
-    try:
-        quiz = QuizGenerator.generate(intent, num_questions)
-        return quiz
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.post("/qa/{lesson_id}", response_model=QAResponse)
 async def ask_question(lesson_id: str, request: QARequest):
@@ -463,24 +200,3 @@ async def ask_question(lesson_id: str, request: QARequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/context/{lesson_id}")
-async def store_context(lesson_id: str, intent: PedagogicalIntent):
-    """
-    Store lesson context for Q&A. Called after lesson generation.
-    """
-    try:
-        store_lesson_context(lesson_id, intent)
-        return {"status": "stored", "lesson_id": lesson_id}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/{topic}")
-async def get_lesson_by_topic(topic: str):
-    """
-    Get a lesson by topic (if it exists in the database).
-    """
-    raise HTTPException(
-        status_code=501,
-        detail="Lesson storage not yet implemented. Use /from-intent endpoint."
-    )
