@@ -12,9 +12,10 @@ Visuals are now identified inline during Layer 1 generation.
 
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Callable, List
+from typing import Optional, Callable, List, Tuple
 from dataclasses import dataclass
 
 from layer1.generator import PedagogicalIntentGenerator
@@ -76,12 +77,18 @@ class FullPipelineOrchestrator:
         video_resolution: str = "480p15",
         use_rag: bool = True,
         rag_examples: int = 3,
+        use_opengl: bool = False,  # Disabled by default - requires Manim >= 0.19.0
+        enable_caching: bool = True,
 
         # Output config
         output_dir: str = "output/pipeline",
-        video_base_url: str = "/api/pipeline/video"
+        video_base_url: str = "/api/pipeline/video",
+
+        # Parallelization config
+        max_parallel_clips: int = 3
     ):
         self.output_dir = Path(output_dir)
+        self.max_parallel_clips = max_parallel_clips
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.video_base_url = video_base_url
 
@@ -99,6 +106,8 @@ class FullPipelineOrchestrator:
             "output_dir": str(self.output_dir / "videos"),
             "use_rag": use_rag,
             "rag_examples": rag_examples,
+            "use_opengl": use_opengl,
+            "enable_caching": enable_caching,
         }
 
         # Lazy-initialized generators
@@ -123,6 +132,79 @@ class FullPipelineOrchestrator:
         if self._layer4 is None:
             self._layer4 = Layer4Generator(**self._layer4_config)
         return self._layer4
+
+    def _process_single_clip(
+        self,
+        section: PedagogicalSection,
+        intent: 'PedagogicalIntent',
+        clip_index: int,
+        total_clips: int
+    ) -> Tuple[int, AnimationClip, dict, float, float]:
+        """
+        Process a single visual section through Layer 3 and Layer 4.
+        Returns: (index, clip, layer_data, layer3_time, layer4_time)
+
+        This method is designed to be called in parallel via ThreadPoolExecutor.
+        """
+        from layer1.schema import PedagogicalIntent
+
+        print(f"  [Clip {clip_index+1}/{total_clips}] Starting: {section.title}")
+
+        try:
+            # Layer 3: Generate focused Manim prompt for this section
+            layer3_start = time.time()
+            clip_prompt = self.layer3.generate_for_section(
+                section=section,
+                intent=intent
+            )
+            layer3_time = time.time() - layer3_start
+
+            # Layer 4: Generate the video
+            layer4_start = time.time()
+            clip_execution = self.layer4.generate(clip_prompt)
+            layer4_time = time.time() - layer4_start
+
+            # Create AnimationClip from result
+            clip = AnimationClip(
+                clip_id=f"section_{section.order}",
+                opportunity_id=f"section_{section.order}",
+                concept=section.title,
+                placement=f"section_{section.order}",
+                video_path=clip_execution.execution_result.video_path if clip_execution.execution_result.success else None,
+                duration_seconds=clip_execution.execution_result.execution_time_seconds if clip_execution.execution_result.success else 0.0,
+                success=clip_execution.execution_result.success,
+                error_message=clip_execution.execution_result.error_message,
+                execution_time_seconds=clip_execution.execution_result.execution_time_seconds,
+                generated_code=clip_execution.code_response.code,
+            )
+
+            # Track Layer 3/4 data for this clip
+            clip_layer_data = {
+                "clip_id": f"section_{section.order}",
+                "section_title": section.title,
+                "section_order": section.order,
+                "layer3_prompt": clip_prompt.model_dump(),
+                "layer4_execution": clip_execution.model_dump(),
+            }
+
+            if clip.success:
+                print(f"  [Clip {clip_index+1}/{total_clips}] ✓ Generated: {clip.video_path}")
+            else:
+                print(f"  [Clip {clip_index+1}/{total_clips}] ✗ Failed: {clip.error_message}")
+
+            return (clip_index, clip, clip_layer_data, layer3_time, layer4_time)
+
+        except Exception as clip_error:
+            print(f"  [Clip {clip_index+1}/{total_clips}] ✗ Exception: {clip_error}")
+            clip = AnimationClip(
+                clip_id=f"section_{section.order}",
+                opportunity_id=f"section_{section.order}",
+                concept=section.title,
+                placement=f"section_{section.order}",
+                success=False,
+                error_message=str(clip_error),
+            )
+            return (clip_index, clip, None, 0.0, 0.0)
 
     def run(
         self,
@@ -201,78 +283,81 @@ class FullPipelineOrchestrator:
             visual_sections = intent.get_visual_sections()
             print(f"Found {len(visual_sections)} sections with visual hints")
 
-            # === Generate clips for each visual section ===
+            # === Generate clips for each visual section (PARALLEL) ===
             if visual_sections:
                 clip_layer_data = []
+                num_clips = len(visual_sections)
+                parallel_workers = min(self.max_parallel_clips, num_clips)
+
                 update_progress(
                     PipelineStage.GENERATING_CLIPS,
                     35,
-                    f"Generating {len(visual_sections)} animation clips..."
+                    f"Generating animation clips..."
                 )
 
+                print(f"\n{'='*60}")
+                print(f"PARALLEL CLIP GENERATION: {num_clips} clips with {parallel_workers} workers")
+                print(f"{'='*60}")
+
                 clip_start = time.time()
-                for i, section in enumerate(visual_sections):
-                    try:
-                        print(f"  Generating clip {i+1}/{len(visual_sections)}: {section.title}")
 
-                        # Layer 3: Generate focused Manim prompt for this section
-                        layer3_start = time.time()
-                        clip_prompt = self.layer3.generate_for_section(
-                            section=section,
-                            intent=intent
-                        )
-                        layer3_time = time.time() - layer3_start
-                        timings.layer3 += layer3_time
+                # Use ThreadPoolExecutor for parallel clip generation
+                with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+                    # Submit all clip generation tasks
+                    futures = {
+                        executor.submit(
+                            self._process_single_clip,
+                            section,
+                            intent,
+                            i,
+                            num_clips
+                        ): i for i, section in enumerate(visual_sections)
+                    }
 
-                        # Layer 4: Generate the video
-                        layer4_start = time.time()
-                        clip_execution = self.layer4.generate(clip_prompt)
-                        layer4_time = time.time() - layer4_start
-                        timings.layer4 += layer4_time
+                    # Collect results as they complete
+                    results = [None] * num_clips  # Pre-allocate to maintain order
 
-                        # Create AnimationClip from result
-                        clip = AnimationClip(
-                            clip_id=f"section_{section.order}",
-                            opportunity_id=f"section_{section.order}",
-                            concept=section.title,
-                            placement=f"section_{section.order}",
-                            video_path=clip_execution.execution_result.video_path if clip_execution.execution_result.success else None,
-                            duration_seconds=clip_execution.execution_result.execution_time_seconds if clip_execution.execution_result.success else 0.0,
-                            success=clip_execution.execution_result.success,
-                            error_message=clip_execution.execution_result.error_message,
-                            execution_time_seconds=clip_execution.execution_result.execution_time_seconds,
-                            generated_code=clip_execution.code_response.code,
-                        )
-                        generated_clips.append(clip)
+                    for future in as_completed(futures):
+                        try:
+                            clip_index, clip, layer_data, l3_time, l4_time = future.result()
+                            results[clip_index] = (clip, layer_data, l3_time, l4_time)
+                        except Exception as e:
+                            clip_index = futures[future]
+                            section = visual_sections[clip_index]
+                            print(f"  [Clip {clip_index+1}/{num_clips}] ✗ Future exception: {e}")
+                            results[clip_index] = (
+                                AnimationClip(
+                                    clip_id=f"section_{section.order}",
+                                    opportunity_id=f"section_{section.order}",
+                                    concept=section.title,
+                                    placement=f"section_{section.order}",
+                                    success=False,
+                                    error_message=str(e),
+                                ),
+                                None,
+                                0.0,
+                                0.0
+                            )
 
-                        # Track Layer 3/4 data for this clip
-                        clip_layer_data.append({
-                            "clip_id": f"section_{section.order}",
-                            "section_title": section.title,
-                            "section_order": section.order,
-                            "layer3_prompt": clip_prompt.model_dump(),
-                            "layer4_execution": clip_execution.model_dump(),
-                        })
-
-                        if clip.success:
-                            print(f"    ✓ Clip generated: {clip.video_path}")
-                        else:
-                            print(f"    ✗ Clip failed: {clip.error_message}")
-
-                    except Exception as clip_error:
-                        print(f"    ✗ Clip {i+1} failed: {clip_error}")
-                        generated_clips.append(AnimationClip(
-                            clip_id=f"section_{section.order}",
-                            opportunity_id=f"section_{section.order}",
-                            concept=section.title,
-                            placement=f"section_{section.order}",
-                            success=False,
-                            error_message=str(clip_error),
-                        ))
+                # Process results in order
+                for clip, layer_data, l3_time, l4_time in results:
+                    generated_clips.append(clip)
+                    if layer_data:
+                        clip_layer_data.append(layer_data)
+                    # Sum timings (represents total work done, not wall time)
+                    timings.layer3 += l3_time
+                    timings.layer4 += l4_time
 
                 timings.clip_generation = time.time() - clip_start
                 successful_clips = sum(1 for c in generated_clips if c.success)
-                print(f"✓ Clip generation complete: {successful_clips}/{len(visual_sections)} succeeded ({timings.clip_generation:.1f}s)")
+
+                print(f"\n{'='*60}")
+                print(f"✓ PARALLEL CLIP GENERATION COMPLETE")
+                print(f"  {successful_clips}/{num_clips} clips succeeded")
+                print(f"  Wall time: {timings.clip_generation:.1f}s")
+                print(f"  Total L3 work: {timings.layer3:.1f}s | Total L4 work: {timings.layer4:.1f}s")
+                print(f"  Parallelization speedup: ~{(timings.layer3 + timings.layer4) / max(timings.clip_generation, 0.1):.1f}x")
+                print(f"{'='*60}\n")
 
                 # Debug callbacks for Layer 3/4 aggregated data
                 if debug_callback and clip_layer_data:

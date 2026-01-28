@@ -955,18 +955,31 @@ VISUAL QUALITY:
 class ManimExecutor:
     """
     Executes generated Manim code and produces video output.
+
+    Supports:
+    - OpenGL renderer for GPU acceleration (faster on M1/M2 Macs and discrete GPUs)
+    - Deterministic file naming for Manim's built-in caching
     """
 
     def __init__(
         self,
         resolution: str = "1080p60",
         quality: str = "high_quality",
-        output_dir: str = "output/videos"
+        output_dir: str = "output/videos",
+        use_opengl: bool = False,  # Disabled by default - requires Manim >= 0.19.0
+        enable_caching: bool = True
     ):
         self.resolution = resolution
         self.quality = quality
         self.output_dir = Path(output_dir)
+        self.use_opengl = use_opengl
+        self.enable_caching = enable_caching
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create a dedicated directory for cached scene files
+        self.cache_dir = self.output_dir / "scene_cache"
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
         self._check_manim_installed()
 
     def _check_manim_installed(self):
@@ -983,6 +996,11 @@ class ManimExecutor:
         except FileNotFoundError:
             raise RuntimeError("Manim not found. Install with: pip install manim")
 
+    def _get_code_hash(self, code: str) -> str:
+        """Generate a short hash of the code for caching purposes."""
+        import hashlib
+        return hashlib.md5(code.encode()).hexdigest()[:12]
+
     def execute(
         self,
         code: str,
@@ -992,25 +1010,53 @@ class ManimExecutor:
         print(f"\nExecuting Manim code for scene: {scene_name}")
 
         start_time = time.time()
-        with tempfile.NamedTemporaryFile(
-            mode='w',
-            suffix='.py',
-            delete=False,
-            dir=str(self.output_dir)
-        ) as f:
-            f.write(code)
-            temp_file = f.name
+
+        # Use deterministic file naming for caching, or temp files if caching disabled
+        if self.enable_caching:
+            code_hash = self._get_code_hash(code)
+            scene_file = self.cache_dir / f"scene_{code_hash}.py"
+            scene_file.write_text(code)
+            # Use absolute path to avoid cwd confusion
+            temp_file = str(scene_file.absolute())
+            delete_after = False
+            print(f"  Cache key: {code_hash}")
+        else:
+            with tempfile.NamedTemporaryFile(
+                mode='w',
+                suffix='.py',
+                delete=False,
+                dir=str(self.output_dir)
+            ) as f:
+                f.write(code)
+                # Use absolute path
+                temp_file = str(Path(f.name).absolute())
+            delete_after = True
 
         try:
-            resolution_flag = self._parse_resolution(self.resolution)
-            # Only pass resolution flag; Manim uses it for quality internally
-            cmd = [
-                "manim",
-                resolution_flag,
-                temp_file,
-                scene_name,
-                "-o", scene_name
-            ]
+            # Build command with appropriate flags
+            if self.use_opengl:
+                # OpenGL: no preview flag, use --write_to_movie
+                quality_flags = self._get_quality_flags(self.resolution, include_preview=False)
+                cmd = [
+                    "manim",
+                    "--renderer=opengl",
+                    "--write_to_movie",
+                    *quality_flags,
+                    temp_file,
+                    scene_name,
+                    "-o", scene_name
+                ]
+                print(f"  Using OpenGL renderer (GPU accelerated)")
+            else:
+                # Cairo: use legacy flags with preview
+                resolution_flag = self._parse_resolution(self.resolution)
+                cmd = [
+                    "manim",
+                    resolution_flag,
+                    temp_file,
+                    scene_name,
+                    "-o", scene_name
+                ]
 
             print(f"Running: {' '.join(cmd)}")
             result = subprocess.run(
@@ -1057,10 +1103,46 @@ class ManimExecutor:
                 )
 
         finally:
-            if Path(temp_file).exists():
+            # Only delete temp files if caching is disabled
+            if delete_after and Path(temp_file).exists():
                 Path(temp_file).unlink()
 
+    def _get_quality_flags(self, resolution: str, include_preview: bool = True) -> List[str]:
+        """
+        Get Manim quality flags for the given resolution.
+
+        Args:
+            resolution: Target resolution (e.g., '480p15', '1080p60')
+            include_preview: Whether to include -p flag (disable for OpenGL/subprocess)
+
+        Returns:
+            List of flags to pass to manim command
+        """
+        # Quality settings: maps resolution to (quality_flag, frame_rate)
+        quality_map = {
+            "1080p60": ("h", 60),   # high quality
+            "1080p30": ("h", 30),
+            "720p60": ("m", 60),    # medium quality
+            "720p30": ("m", 30),
+            "480p30": ("l", 30),    # low quality
+            "480p15": ("l", 15)
+        }
+
+        quality, fps = quality_map.get(resolution, ("h", 60))
+
+        flags = [f"-q{quality}"]
+
+        # Add frame rate flag
+        flags.append(f"--frame_rate={fps}")
+
+        # Add preview flag only if requested (not for OpenGL in subprocess)
+        if include_preview:
+            flags.insert(0, "-p")
+
+        return flags
+
     def _parse_resolution(self, resolution: str) -> str:
+        """Legacy method for backward compatibility."""
         mapping = {
             "1080p60": "-pqh",
             "1080p30": "-ph",
@@ -1135,6 +1217,10 @@ class Layer4Generator:
     """
     Orchestrates: Prompt → Code → Validation → Execution
     Supports RAG (Retrieval-Augmented Generation) with ManimBench-v1 dataset.
+
+    Performance options:
+    - use_opengl: Enable GPU-accelerated rendering (faster on M1/M2 Macs)
+    - enable_caching: Use deterministic file names for Manim's built-in caching
     """
 
     def __init__(
@@ -1146,7 +1232,9 @@ class Layer4Generator:
         manim_quality: str = "high_quality",
         output_dir: str = "output/videos",
         use_rag: bool = True,
-        rag_examples: int = 3
+        rag_examples: int = 3,
+        use_opengl: bool = False,  # Disabled by default - requires Manim >= 0.19.0
+        enable_caching: bool = True
     ):
         self.code_generator = ManimCodeGenerator(
             api_provider=api_provider,
@@ -1158,7 +1246,9 @@ class Layer4Generator:
         self.executor = ManimExecutor(
             resolution=manim_resolution,
             quality=manim_quality,
-            output_dir=output_dir
+            output_dir=output_dir,
+            use_opengl=use_opengl,
+            enable_caching=enable_caching
         )
 
     def generate(
