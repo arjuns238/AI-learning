@@ -64,11 +64,31 @@ def detect_scene_name(code: str) -> Optional[str]:
 
 # ---------- RAG Vector Store ----------
 
+import threading
+
+# Thread-safe singleton for embedder (expensive to load, should only be loaded once)
+_embedder_lock = threading.Lock()
+_shared_embedder = None
+
+def _get_shared_embedder():
+    """Get or create the shared SentenceTransformer embedder (thread-safe singleton)."""
+    global _shared_embedder
+    if _shared_embedder is None:
+        with _embedder_lock:
+            # Double-check after acquiring lock
+            if _shared_embedder is None:
+                if HAS_SENTENCE_TRANSFORMERS:
+                    _shared_embedder = SentenceTransformer("all-MiniLM-L6-v2")
+    return _shared_embedder
+
+
 class ManimVectorStore:
     """
     Vector store for Manim datasets using Chroma.
     Supports multiple datasets: ManimBench-v1, 3blue1brown-manim, and more.
     Stores embeddings persistently in the project data directory.
+
+    Uses a thread-safe singleton for the embedder to avoid parallel loading issues.
     """
 
     # Store vector database in project data directory
@@ -124,8 +144,8 @@ class ManimVectorStore:
                 metadata={"hnsw:space": "cosine"}
             )
 
-            # Initialize embedder
-            self.embedder = SentenceTransformer("all-MiniLM-L6-v2")
+            # Use shared embedder (thread-safe singleton)
+            self.embedder = _get_shared_embedder()
 
             self._initialized = True
             count = self.collection.count()
@@ -966,7 +986,7 @@ class ManimExecutor:
         resolution: str = "1080p60",
         quality: str = "high_quality",
         output_dir: str = "output/videos",
-        use_opengl: bool = False,  # Disabled by default - requires Manim >= 0.19.0
+        use_opengl: bool = False,  # OpenGL has issues with parallel rendering; Cairo is faster and more reliable
         enable_caching: bool = True
     ):
         self.resolution = resolution
@@ -1233,7 +1253,7 @@ class Layer4Generator:
         output_dir: str = "output/videos",
         use_rag: bool = True,
         rag_examples: int = 3,
-        use_opengl: bool = False,  # Disabled by default - requires Manim >= 0.19.0
+        use_opengl: bool = False,  # OpenGL has issues with parallel rendering; Cairo is faster and more reliable
         enable_caching: bool = True
     ):
         self.code_generator = ManimCodeGenerator(

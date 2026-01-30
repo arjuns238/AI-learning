@@ -77,7 +77,7 @@ class FullPipelineOrchestrator:
         video_resolution: str = "480p15",
         use_rag: bool = True,
         rag_examples: int = 3,
-        use_opengl: bool = False,  # Disabled by default - requires Manim >= 0.19.0
+        use_opengl: bool = False,  # OpenGL has issues with parallel rendering; Cairo is faster and more reliable
         enable_caching: bool = True,
 
         # Output config
