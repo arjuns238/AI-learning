@@ -107,11 +107,11 @@ export default function DebugPage() {
   };
 
   const getStatusBadge = (status: string) => {
-    const variants: Record<string, "default" | "outline" | "soft"> = {
-      completed: "soft",
+    const variants: Record<string, "default" | "outline" | "secondary"> = {
+      completed: "secondary",
       failed: "outline",
       pending: "outline",
-      in_progress: "soft",
+      in_progress: "secondary",
     };
     const colors: Record<string, string> = {
       completed: "bg-green-100 text-green-800 border-green-200",
@@ -140,7 +140,7 @@ export default function DebugPage() {
       <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-12 lg:px-12">
         {/* Header */}
         <section className="space-y-4">
-          <Badge variant="soft">Pipeline Inspector</Badge>
+          <Badge variant="secondary">Pipeline Inspector</Badge>
           <h1 className="font-serif text-3xl font-semibold sm:text-4xl">
             Debug Dashboard
           </h1>

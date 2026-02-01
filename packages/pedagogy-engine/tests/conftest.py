@@ -14,8 +14,8 @@ if str(pedagogy_engine_root) not in sys.path:
 
 # Verify imports work
 try:
-    import layer2.schema
     import layer1.schema
+    import layer3.schema
 except ImportError as e:
     print(f"ERROR in conftest: Failed to import modules: {e}")
     print(f"sys.path: {sys.path}")

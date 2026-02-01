@@ -127,7 +127,7 @@ class PedagogicalIntent(BaseModel):
     sections: List[PedagogicalSection] = Field(
         ...,
         description="Dynamic list of pedagogical sections (2-8 sections)",
-        min_length=2,
+        min_length=1,
         max_length=8
     )
 

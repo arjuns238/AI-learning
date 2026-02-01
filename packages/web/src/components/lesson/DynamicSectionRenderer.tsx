@@ -1,7 +1,5 @@
 "use client";
 
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { MathExpression } from "@/components/math/MathExpression";
 import type {
   PedagogicalSection,
@@ -17,9 +15,9 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
 function StepsList({ steps }: { steps: string[] }) {
   return (
-    <ol className="list-decimal list-inside space-y-2 mt-4 pl-2">
+    <ol className="list-decimal list-inside space-y-1 mt-3 text-gray-700">
       {steps.map((step, index) => (
-        <li key={index} className="text-slate-700 leading-relaxed">
+        <li key={index} className="leading-relaxed">
           {step}
         </li>
       ))}
@@ -29,9 +27,9 @@ function StepsList({ steps }: { steps: string[] }) {
 
 function MathBlock({ expressions }: { expressions: string[] }) {
   return (
-    <div className="mt-4 space-y-3 bg-slate-50 rounded-lg p-4">
+    <div className="mt-3 space-y-2">
       {expressions.map((expr, index) => (
-        <div key={index} className="overflow-x-auto">
+        <div key={index} className="overflow-x-auto py-2">
           <MathExpression expression={expr} display={true} />
         </div>
       ))}
@@ -39,37 +37,24 @@ function MathBlock({ expressions }: { expressions: string[] }) {
   );
 }
 
-function ComparisonTable({ comparison }: { comparison: Comparison }) {
+function ComparisonBlock({ comparison }: { comparison: Comparison }) {
   return (
-    <div className="mt-4 grid grid-cols-2 gap-4">
-      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-        <h4 className="font-semibold text-blue-800 mb-2">{comparison.item_a}</h4>
-      </div>
-      <div className="rounded-lg border border-purple-200 bg-purple-50 p-4">
-        <h4 className="font-semibold text-purple-800 mb-2">{comparison.item_b}</h4>
-      </div>
-      <div className="col-span-2 rounded-lg border border-slate-200 bg-slate-50 p-4">
-        <p className="text-slate-700">
-          <span className="font-medium">Key difference:</span> {comparison.difference}
-        </p>
-      </div>
+    <div className="mt-3 text-gray-700">
+      <p><strong>{comparison.item_a}</strong> vs <strong>{comparison.item_b}</strong></p>
+      <p className="mt-1 text-gray-600">
+        <em>Key difference:</em> {comparison.difference}
+      </p>
     </div>
   );
 }
 
 function VideoPlayer({
   clip,
-  jobId,
 }: {
   clip: AnimationClipSummary;
-  jobId: string;
 }) {
   if (!clip.success || !clip.video_url) {
-    return (
-      <div className="mt-4 rounded-lg bg-slate-100 p-4 text-center text-slate-500">
-        Video unavailable{clip.error_message && `: ${clip.error_message}`}
-      </div>
-    );
+    return null;
   }
 
   const videoUrl = clip.video_url.startsWith("http")
@@ -77,7 +62,7 @@ function VideoPlayer({
     : `${API_BASE}${clip.video_url}`;
 
   return (
-    <div className="mt-4 rounded-lg overflow-hidden bg-slate-900">
+    <div className="mt-4 rounded-lg overflow-hidden bg-gray-900">
       <video
         className="w-full aspect-video"
         controls
@@ -89,59 +74,48 @@ function VideoPlayer({
         <source src={videoUrl} type="video/mp4" />
         Your browser does not support the video tag.
       </video>
-      {clip.duration_seconds > 0 && (
-        <div className="px-3 py-2 text-sm text-slate-400">
-          Duration: {clip.duration_seconds.toFixed(1)}s
-        </div>
-      )}
     </div>
   );
 }
 
 // ============================================
-// Single Section Card
+// Single Section (Markdown-like)
 // ============================================
 
-type SectionCardProps = {
+type SectionProps = {
   section: PedagogicalSection;
   clip?: AnimationClipSummary;
-  jobId: string;
 };
 
-function SectionCard({ section, clip, jobId }: SectionCardProps) {
+function Section({ section, clip }: SectionProps) {
   return (
-    <Card className="overflow-hidden">
-      <CardContent className="pt-6 space-y-4">
-        {/* Section header */}
-        <div className="flex items-center gap-3">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-900 text-sm font-medium text-white">
-            {section.order}
-          </span>
-          <h2 className="text-xl font-semibold text-slate-900">{section.title}</h2>
-        </div>
+    <div className="space-y-2">
+      {/* Section title */}
+      <h3 className="text-lg font-semibold text-gray-900">
+        {section.title}
+      </h3>
 
-        {/* Main content */}
-        <p className="text-slate-700 leading-relaxed whitespace-pre-wrap">
-          {section.content}
-        </p>
+      {/* Main content */}
+      <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">
+        {section.content}
+      </p>
 
-        {/* Steps list */}
-        {section.steps && section.steps.length > 0 && (
-          <StepsList steps={section.steps} />
-        )}
+      {/* Steps list */}
+      {section.steps && section.steps.length > 0 && (
+        <StepsList steps={section.steps} />
+      )}
 
-        {/* Math expressions */}
-        {section.math_expressions && section.math_expressions.length > 0 && (
-          <MathBlock expressions={section.math_expressions} />
-        )}
+      {/* Math expressions */}
+      {section.math_expressions && section.math_expressions.length > 0 && (
+        <MathBlock expressions={section.math_expressions} />
+      )}
 
-        {/* Comparison table */}
-        {section.comparison && <ComparisonTable comparison={section.comparison} />}
+      {/* Comparison */}
+      {section.comparison && <ComparisonBlock comparison={section.comparison} />}
 
-        {/* Embedded video for this section */}
-        {clip && <VideoPlayer clip={clip} jobId={jobId} />}
-      </CardContent>
-    </Card>
+      {/* Embedded video for this section */}
+      {clip && <VideoPlayer clip={clip} />}
+    </div>
   );
 }
 
@@ -158,7 +132,6 @@ type DynamicSectionRendererProps = {
 export function DynamicSectionRenderer({
   sections,
   clips,
-  jobId,
 }: DynamicSectionRendererProps) {
   // Sort sections by order
   const sortedSections = [...sections].sort((a, b) => a.order - b.order);
@@ -174,16 +147,15 @@ export function DynamicSectionRenderer({
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {sortedSections.map((section) => {
         const clip = clipMap.get(section.order);
 
         return (
-          <SectionCard
+          <Section
             key={section.order}
             section={section}
             clip={clip}
-            jobId={jobId}
           />
         );
       })}
