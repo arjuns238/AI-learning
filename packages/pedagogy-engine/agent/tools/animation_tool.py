@@ -5,19 +5,26 @@ Wraps Layer 3 (prompt generation) and Layer 4 (code generation + execution)
 to provide animation generation as a tool for the educational agent.
 
 Videos are uploaded to Supabase Storage and served via signed URLs.
+
+NOTE: Heavy imports (layer3, layer4) are deferred to avoid 7+ second import
+cascade when the agent package is loaded. They are imported lazily in the
+property getters where they're actually needed.
 """
 
 import asyncio
 import uuid
 import os
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor
 
-from layer1.schema import PedagogicalIntent, PedagogicalSection, VisualHint
-from layer3.generator import ManimPromptGenerator
-from layer4.generator import Layer4Generator
 from agent.schema import AnimationResult
+
+# Type hints only - not imported at runtime
+if TYPE_CHECKING:
+    from layer1.schema import PedagogicalIntent, PedagogicalSection, VisualHint
+    from layer3.generator import ManimPromptGenerator
+    from layer4.generator import Layer4Generator
 
 # Try to import Supabase VideoStore (may not be configured)
 try:
@@ -108,14 +115,18 @@ Do NOT use this tool when:
         self._executor = ThreadPoolExecutor(max_workers=1)
 
     @property
-    def layer3(self) -> ManimPromptGenerator:
+    def layer3(self) -> "ManimPromptGenerator":
         if self._layer3 is None:
+            # Lazy import to avoid 7+ second import cascade at module load time
+            from layer3.generator import ManimPromptGenerator
             self._layer3 = ManimPromptGenerator()
         return self._layer3
 
     @property
-    def layer4(self) -> Layer4Generator:
+    def layer4(self) -> "Layer4Generator":
         if self._layer4 is None:
+            # Lazy import to avoid 7+ second import cascade at module load time
+            from layer4.generator import Layer4Generator
             self._layer4 = Layer4Generator(
                 manim_resolution=self.video_resolution,
                 output_dir=str(self.output_dir),
@@ -130,13 +141,16 @@ Do NOT use this tool when:
         concept: str,
         context: str,
         focus_area: Optional[str] = None
-    ) -> tuple[PedagogicalIntent, PedagogicalSection]:
+    ) -> tuple["PedagogicalIntent", "PedagogicalSection"]:
         """
         Create minimal PedagogicalIntent and Section for the animation tool.
 
         Since we're generating a single focused animation (not a full lesson),
         we create a simplified structure that Layer 3 can work with.
         """
+        # Lazy import layer1 schema (lightweight but keeps imports consistent)
+        from layer1.schema import PedagogicalIntent, PedagogicalSection, VisualHint
+
         # Build animation description
         animation_description = f"Visualize {concept}."
         if focus_area:

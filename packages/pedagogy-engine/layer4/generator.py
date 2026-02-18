@@ -82,6 +82,26 @@ def _get_shared_embedder():
     return _shared_embedder
 
 
+# Thread-safe singleton for vector store (expensive to load - Chroma DB + embeddings)
+_vector_store_lock = threading.Lock()
+_shared_vector_store = None
+
+def _get_shared_vector_store():
+    """Get or create the shared ManimVectorStore instance (thread-safe singleton).
+
+    This avoids reloading the Chroma database and embeddings on every request,
+    saving 500-1500ms per animation generation.
+    """
+    global _shared_vector_store
+    if _shared_vector_store is None:
+        with _vector_store_lock:
+            # Double-check after acquiring lock
+            if _shared_vector_store is None:
+                print("🚀 Initializing shared vector store (one-time)...")
+                _shared_vector_store = ManimVectorStore()
+    return _shared_vector_store
+
+
 class ManimVectorStore:
     """
     Vector store for Manim datasets using Chroma.
@@ -561,11 +581,15 @@ class ManimVectorStore:
 class ManimBenchRetriever:
     """
     Retrieves relevant examples from ManimBench-v1 using vector store.
+
+    Uses a shared vector store singleton to avoid reloading the Chroma database
+    and embeddings on each instantiation.
     """
 
     def __init__(self):
-        self.vector_store = ManimVectorStore()
-        self._initialized = self.vector_store._initialized
+        # Use shared vector store singleton instead of creating new instance
+        self.vector_store = _get_shared_vector_store()
+        self._initialized = self.vector_store._initialized if self.vector_store else False
 
     def retrieve(self, query: str, top_k: int = 3) -> List[dict]:
         """Delegate to vector store."""

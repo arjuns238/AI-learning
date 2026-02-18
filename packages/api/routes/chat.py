@@ -6,6 +6,7 @@ Provides SSE (Server-Sent Events) streaming for real-time chat with the agent.
 
 import json
 import uuid
+import threading
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
@@ -21,6 +22,24 @@ router = APIRouter()
 
 # In-memory session store (replace with Supabase in production)
 sessions: Dict[str, Session] = {}
+
+# Singleton agent instance - created once, reused across all requests
+# This avoids the 400-1000ms overhead of creating a new agent per message
+_agent_instance: Optional[EducationalAgent] = None
+_agent_lock = threading.Lock()
+
+
+def get_agent() -> EducationalAgent:
+    """Get or create the singleton EducationalAgent instance (thread-safe)."""
+    global _agent_instance
+    if _agent_instance is None:
+        with _agent_lock:
+            # Double-check after acquiring lock
+            if _agent_instance is None:
+                print("🚀 Initializing singleton EducationalAgent...")
+                _agent_instance = EducationalAgent()
+                print("✓ Agent ready for requests")
+    return _agent_instance
 
 
 class ChatRequest(BaseModel):
@@ -68,7 +87,7 @@ async def chat_stream(request: ChatRequest):
 
     async def event_generator():
         try:
-            agent = EducationalAgent()
+            agent = get_agent()
 
             # Track the full response for session history
             full_response = ""
@@ -168,7 +187,7 @@ async def chat_sync(request: ChatRequest) -> ChatResponse:
     session = get_or_create_session(request.session_id)
 
     try:
-        agent = EducationalAgent()
+        agent = get_agent()
 
         full_response = ""
         animations = []

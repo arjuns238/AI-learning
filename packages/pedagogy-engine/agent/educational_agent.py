@@ -6,6 +6,9 @@ Built on LangChain v1's create_agent for:
 - Tool calling with automatic loops
 - Middleware support (PII filtering, summarization, human-in-the-loop)
 - Session/state management via checkpointing
+
+NOTE: Heavy LangChain imports are deferred to avoid slow import times.
+They are loaded lazily when EducationalAgent is first instantiated.
 """
 
 import json
@@ -13,10 +16,12 @@ from typing import AsyncIterator, Optional, List, Dict, Any
 from dotenv import load_dotenv
 from pathlib import Path
 
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
-from langchain_core.tools import tool
-from langchain.agents import create_agent
-from langgraph.checkpoint.memory import InMemorySaver
+# NOTE: Heavy LangChain imports are deferred to avoid 3+ second import time.
+# They are imported lazily inside methods where needed:
+# - InMemorySaver: in __init__
+# - tool decorator: in _get_tools
+# - create_agent: in _get_agent
+# - HumanMessage, AIMessage, etc.: in _convert_messages_to_langchain and chat
 
 from agent.schema import (
     TextChunk,
@@ -35,12 +40,24 @@ load_dotenv()
 _AGENT_LAYER_DIR = Path(__file__).parent
 _PEDAGOGY_ENGINE_ROOT = _AGENT_LAYER_DIR.parent
 
+# Cache the system prompt template (read once, reused across all requests)
+_cached_system_prompt: Optional[str] = None
+
+
+def _get_base_system_prompt() -> str:
+    """Get the cached base system prompt template (loaded once from disk)."""
+    global _cached_system_prompt
+    if _cached_system_prompt is None:
+        template_path = _PEDAGOGY_ENGINE_ROOT / "prompts" / "agent_system_prompt.txt"
+        with open(template_path, 'r') as f:
+            _cached_system_prompt = f.read()
+    return _cached_system_prompt
+
+
 def _build_system_prompt(learner_context: Optional[LearnerContext] = None) -> str:
     """Build the system prompt with pedagogical instructions and learner context."""
-     # Load prompt template
-    template_path = _PEDAGOGY_ENGINE_ROOT / "prompts" / "agent_system_prompt.txt"
-    with open(template_path, 'r') as f:
-        base_prompt = f.read()
+    # Use cached template instead of reading from disk each time
+    base_prompt = _get_base_system_prompt()
 
     # Add learner context if available
     if learner_context and (learner_context.topics_explored or learner_context.concepts_struggled_with):
@@ -100,7 +117,8 @@ class EducationalAgent:
         self._animation_tool_instance = None
         self._tools = None
 
-        # Memory saver for session persistence
+        # Memory saver for session persistence (lazy import)
+        from langgraph.checkpoint.memory import InMemorySaver
         self.checkpointer = InMemorySaver()
 
         print(f"✓ Educational Agent initialized with LangChain v1 create_agent ({self.api_provider}: {self.model})")
@@ -119,6 +137,9 @@ class EducationalAgent:
         """Get the list of tools for the agent."""
         if self._tools is not None:
             return self._tools
+
+        # Lazy import of LangChain tool decorator
+        from langchain_core.tools import tool
 
         animation_tool_instance = self._get_animation_tool()
 
@@ -161,6 +182,8 @@ class EducationalAgent:
 
     def _get_agent(self, system_prompt: str):
         """Create the agent with the given system prompt."""
+        # Lazy import of LangChain agent factory
+        from langchain.agents import create_agent
         return create_agent(
             model=self.model,
             tools=self._get_tools(),
@@ -173,6 +196,9 @@ class EducationalAgent:
 
         Properly handles tool calls and tool results to maintain context.
         """
+        # Lazy import of LangChain message types
+        from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+
         lc_messages = []
         for msg in messages:
             if msg.role == MessageRole.USER:
@@ -223,37 +249,38 @@ class EducationalAgent:
         - ToolResult: When a tool completes
         - StreamDone: When streaming is complete
         """
+        # Lazy imports for LangChain message types
         from langchain.messages import AIMessageChunk
-        from langchain_core.messages import ToolMessage as LCToolMessage
+        from langchain_core.messages import HumanMessage, ToolMessage as LCToolMessage
 
-        # DEBUG: Log conversation history
+        # DEBUG: Timing for performance analysis
         import sys
+        import time
+        timings = {}
+
+        t0 = time.time()
         print(f"\n{'='*60}", flush=True)
         print(f"DEBUG: chat() called with {len(conversation_history)} messages in history", flush=True)
-        for i, msg in enumerate(conversation_history):
-            tool_info = f", tool_calls={len(msg.tool_calls)}" if msg.tool_calls else ""
-            tool_id_info = f", tool_call_id={msg.tool_call_id}" if msg.tool_call_id else ""
-            content_preview = msg.content[:80].replace('\n', ' ') if msg.content else "(empty)"
-            print(f"  [{i}] {msg.role.value}: {content_preview}...{tool_info}{tool_id_info}", flush=True)
         print(f"DEBUG: New message: {message[:80]}...", flush=True)
         print(f"{'='*60}\n", flush=True)
         sys.stdout.flush()
 
+        t1 = time.time()
         system_prompt = _build_system_prompt(learner_context)
-        agent = self._get_agent(system_prompt)
+        timings['build_system_prompt'] = time.time() - t1
 
+        t1 = time.time()
+        agent = self._get_agent(system_prompt)
+        timings['get_agent'] = time.time() - t1
+
+        t1 = time.time()
         # Convert conversation history and add new message
         lc_messages = self._convert_messages_to_langchain(conversation_history)
+        timings['convert_messages'] = time.time() - t1
 
-        # DEBUG: Log converted messages
-        print(f"DEBUG: Converted to {len(lc_messages)} LangChain messages")
-        for i, lc_msg in enumerate(lc_messages):
-            msg_type = type(lc_msg).__name__
-            tool_calls = getattr(lc_msg, 'tool_calls', None)
-            tool_info = f", tool_calls={len(tool_calls)}" if tool_calls else ""
-            content_preview = lc_msg.content[:80].replace('\n', ' ') if lc_msg.content else "(empty)"
-            print(f"  [{i}] {msg_type}: {content_preview}...{tool_info}")
-        print(f"{'='*60}\n")
+        print(f"⏱️  TIMING: build_prompt={timings['build_system_prompt']:.3f}s, get_agent={timings['get_agent']:.3f}s, convert_msgs={timings['convert_messages']:.3f}s")
+        print(f"⏱️  TIMING: Total setup before LLM call: {time.time() - t0:.3f}s")
+        sys.stdout.flush()
 
         lc_messages.append(HumanMessage(content=message))
 
@@ -264,14 +291,21 @@ class EducationalAgent:
         # Track state for aggregating message chunks
         full_message = None
         tool_calls_yielded: set = set()
+        first_token_time = None
+        stream_start_time = time.time()
 
         try:
+            print(f"⏱️  TIMING: Starting LLM stream...", flush=True)
             # Use stream_mode="messages" for token streaming, and "updates" for completed messages
             async for stream_mode, data in agent.astream(
                 {"messages": lc_messages},
                 config=config,
                 stream_mode=["messages", "updates"],
             ):
+                if first_token_time is None:
+                    first_token_time = time.time()
+                    print(f"⏱️  TIMING: Time to first token: {first_token_time - stream_start_time:.3f}s", flush=True)
+
                 if stream_mode == "messages":
                     token, metadata = data
 
