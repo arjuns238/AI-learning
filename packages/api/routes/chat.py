@@ -6,7 +6,7 @@ Provides SSE (Server-Sent Events) streaming for real-time chat with the agent.
 
 import json
 import uuid
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from agent import EducationalAgent, Session, LearnerContext, MessageRole
-from agent.schema import TextChunk, ToolCall, ToolResult, StreamDone
+from agent.schema import TextChunk, ToolCall, ToolResult, StreamDone, Message
 
 
 router = APIRouter()
@@ -73,6 +73,9 @@ async def chat_stream(request: ChatRequest):
             # Track the full response for session history
             full_response = ""
             animations = []
+            # Track tool calls and results for proper context preservation
+            tool_calls_made: List[ToolCall] = []
+            tool_results_received: List[ToolResult] = []
 
             async for event in agent.chat(
                 message=request.message,
@@ -85,9 +88,14 @@ async def chat_stream(request: ChatRequest):
                     yield f"data: {json.dumps({'type': 'text', 'content': event.content})}\n\n"
 
                 elif isinstance(event, ToolCall):
+                    # Track tool call for session history
+                    tool_calls_made.append(event)
                     yield f"data: {json.dumps({'type': 'tool_start', 'tool': event.name, 'id': event.id, 'arguments': event.arguments})}\n\n"
 
                 elif isinstance(event, ToolResult):
+                    # Track tool result for session history
+                    tool_results_received.append(event)
+
                     result_data = {
                         'type': 'tool_result',
                         'tool': event.name,
@@ -105,13 +113,35 @@ async def chat_stream(request: ChatRequest):
                     yield f"data: {json.dumps(result_data)}\n\n"
 
                 elif isinstance(event, StreamDone):
-                    # Save to session history
+                    # Save user message first
                     session.add_message(MessageRole.USER, request.message)
+
+                    # Save assistant message with tool calls included
                     session.add_message(
                         MessageRole.ASSISTANT,
                         full_response,
+                        tool_calls=tool_calls_made if tool_calls_made else None,
                         animations=animations
                     )
+
+                    # Save tool result messages so context is preserved
+                    for tool_result in tool_results_received:
+                        result_content = json.dumps(tool_result.result)
+                        session.add_message(
+                            MessageRole.TOOL,
+                            result_content,
+                            tool_call_id=tool_result.id
+                        )
+
+                    # DEBUG: Log what's in the session after saving
+                    print(f"\n{'='*60}")
+                    print(f"DEBUG: Session {session.session_id} now has {len(session.messages)} messages:")
+                    for i, msg in enumerate(session.messages):
+                        tool_info = f", tool_calls={len(msg.tool_calls)}" if msg.tool_calls else ""
+                        tool_id_info = f", tool_call_id={msg.tool_call_id}" if msg.tool_call_id else ""
+                        content_preview = msg.content[:60].replace('\n', ' ') if msg.content else "(empty)"
+                        print(f"  [{i}] {msg.role.value}: {content_preview}...{tool_info}{tool_id_info}")
+                    print(f"{'='*60}\n")
 
                     yield f"data: {json.dumps({'type': 'done', 'session_id': session.session_id})}\n\n"
 
@@ -142,6 +172,8 @@ async def chat_sync(request: ChatRequest) -> ChatResponse:
 
         full_response = ""
         animations = []
+        tool_calls_made: List[ToolCall] = []
+        tool_results_received: List[ToolResult] = []
 
         async for event in agent.chat(
             message=request.message,
@@ -151,17 +183,32 @@ async def chat_sync(request: ChatRequest) -> ChatResponse:
         ):
             if isinstance(event, TextChunk):
                 full_response += event.content
+            elif isinstance(event, ToolCall):
+                tool_calls_made.append(event)
             elif isinstance(event, ToolResult):
+                tool_results_received.append(event)
                 if event.name == "generate_animation" and event.success:
                     animations.append(event.result.get("video_url"))
 
-        # Save to session
+        # Save user message
         session.add_message(MessageRole.USER, request.message)
+
+        # Save assistant message with tool calls
         session.add_message(
             MessageRole.ASSISTANT,
             full_response,
+            tool_calls=tool_calls_made if tool_calls_made else None,
             animations=animations
         )
+
+        # Save tool result messages
+        for tool_result in tool_results_received:
+            result_content = json.dumps(tool_result.result)
+            session.add_message(
+                MessageRole.TOOL,
+                result_content,
+                tool_call_id=tool_result.id
+            )
 
         return ChatResponse(
             session_id=session.session_id,

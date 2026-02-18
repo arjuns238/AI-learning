@@ -86,7 +86,7 @@ Do NOT use this tool when:
         self,
         api_provider: str = "anthropic",
         video_resolution: str = "480p15",
-        output_dir: str = "output/agent_videos",
+        output_dir: str = "/tmp/manim_agent_videos",  # Outside API folder to prevent uvicorn reload
         use_supabase: bool = True,
         url_expires_in: int = 3600  # 1 hour default
     ):
@@ -117,7 +117,6 @@ Do NOT use this tool when:
     def layer4(self) -> Layer4Generator:
         if self._layer4 is None:
             self._layer4 = Layer4Generator(
-                api_provider=self.api_provider,
                 manim_resolution=self.video_resolution,
                 output_dir=str(self.output_dir),
                 use_rag=True,

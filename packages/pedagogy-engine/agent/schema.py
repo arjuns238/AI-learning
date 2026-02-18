@@ -74,10 +74,27 @@ class Message:
 
     def to_api_format(self) -> Dict[str, Any]:
         """Convert to format expected by LLM APIs."""
-        return {
+        result = {
             "role": self.role.value,
             "content": self.content
         }
+
+        # Include tool calls for assistant messages
+        if self.tool_calls:
+            result["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "name": tc.name,
+                    "arguments": tc.arguments
+                }
+                for tc in self.tool_calls
+            ]
+
+        # Include tool_call_id for tool result messages
+        if self.tool_call_id:
+            result["tool_call_id"] = self.tool_call_id
+
+        return result
 
 
 # ============ Learner Context ============
@@ -172,17 +189,28 @@ class Session:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for storage."""
+        messages_data = []
+        for msg in self.messages:
+            msg_dict = {
+                "role": msg.role.value,
+                "content": msg.content,
+                "timestamp": msg.timestamp.isoformat(),
+                "animations": msg.animations
+            }
+            # Include tool calls for assistant messages
+            if msg.tool_calls:
+                msg_dict["tool_calls"] = [
+                    {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                    for tc in msg.tool_calls
+                ]
+            # Include tool_call_id for tool result messages
+            if msg.tool_call_id:
+                msg_dict["tool_call_id"] = msg.tool_call_id
+            messages_data.append(msg_dict)
+
         return {
             "session_id": self.session_id,
-            "messages": [
-                {
-                    "role": msg.role.value,
-                    "content": msg.content,
-                    "timestamp": msg.timestamp.isoformat(),
-                    "animations": msg.animations
-                }
-                for msg in self.messages
-            ],
+            "messages": messages_data,
             "learner_context": self.learner_context.to_dict(),
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat()

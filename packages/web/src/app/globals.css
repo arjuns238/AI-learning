@@ -2,63 +2,71 @@
 
 @layer base {
   :root {
-    /* Base colors */
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
+    /* Learning-focused palette: calm, trustworthy, easy on the eyes */
+    --background: 210 20% 99%;
+    --foreground: 215 20% 14%;
 
-    /* Card/Popover */
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
+    /* Card surfaces - very subtle blue tint for cohesion */
+    --card: 210 15% 97%;
+    --card-foreground: 215 20% 14%;
+    --popover: 210 15% 97%;
+    --popover-foreground: 215 20% 14%;
 
-    /* Primary */
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
+    /* Primary - muted steel blue (trust, clarity, focus) */
+    --primary: 210 45% 45%;
+    --primary-foreground: 0 0% 100%;
 
-    /* Secondary */
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
+    /* Secondary - soft cool gray */
+    --secondary: 210 12% 91%;
+    --secondary-foreground: 215 15% 28%;
 
     /* Muted */
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
+    --muted: 210 10% 93%;
+    --muted-foreground: 215 10% 46%;
 
     /* Accent */
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
+    --accent: 210 15% 94%;
+    --accent-foreground: 215 15% 22%;
 
     /* Destructive */
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
+    --destructive: 0 65% 55%;
+    --destructive-foreground: 0 0% 100%;
 
     /* UI Elements */
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
-    --radius: 0.625rem;
+    --border: 210 12% 89%;
+    --input: 210 12% 89%;
+    --ring: 210 45% 45%;
+    --radius: 0.75rem;
+
+    /* Custom */
+    --user-bubble: 210 20% 94%;
+    --assistant-bg: 210 20% 99%;
+    --input-bg: 0 0% 100%;
   }
 
   .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
+    --background: 215 25% 7%;
+    --foreground: 210 15% 95%;
+    --card: 215 20% 9%;
+    --card-foreground: 210 15% 95%;
+    --popover: 215 20% 9%;
+    --popover-foreground: 210 15% 95%;
+    --primary: 210 50% 55%;
+    --primary-foreground: 215 25% 7%;
+    --secondary: 215 15% 14%;
+    --secondary-foreground: 210 12% 88%;
+    --muted: 215 15% 16%;
+    --muted-foreground: 210 10% 55%;
+    --accent: 215 15% 16%;
+    --accent-foreground: 210 12% 88%;
+    --destructive: 0 55% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 215 15% 16%;
+    --input: 215 15% 16%;
+    --ring: 210 50% 55%;
+    --user-bubble: 215 18% 12%;
+    --assistant-bg: 215 25% 8%;
+    --input-bg: 215 18% 10%;
   }
 }
 
@@ -67,9 +75,21 @@
     @apply border-border;
   }
 
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
     @apply bg-background text-foreground;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: var(--font-dm-sans), system-ui, sans-serif;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.15);
+    color: hsl(var(--foreground));
   }
 }
 
@@ -97,4 +117,210 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --color-user-bubble: hsl(var(--user-bubble));
+  --color-assistant-bg: hsl(var(--assistant-bg));
+  --color-input-bg: hsl(var(--input-bg));
+}
+
+/* Typography for markdown content */
+.prose {
+  @apply text-foreground;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.prose h1, .prose h2, .prose h3, .prose h4 {
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  @apply font-semibold text-foreground mt-8 mb-4 first:mt-0;
+  letter-spacing: -0.01em;
+}
+
+.prose h1 {
+  @apply text-2xl;
+  font-weight: 600;
+}
+
+.prose h2 {
+  @apply text-xl;
+  font-weight: 600;
+}
+
+.prose h3 {
+  @apply text-lg;
+  font-weight: 600;
+}
+
+.prose p {
+  @apply mb-5 last:mb-0;
+}
+
+.prose code {
+  font-family: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+  @apply bg-secondary px-1.5 py-0.5 rounded text-sm;
+  font-weight: 450;
+}
+
+.prose pre {
+  @apply bg-[#1e2028] text-gray-100 p-5 rounded-xl overflow-x-auto my-6;
+  font-family: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+  font-size: 0.875rem;
+  line-height: 1.7;
+  box-shadow: 0 4px 20px -4px rgba(0, 0, 0, 0.1);
+}
+
+.prose pre code {
+  @apply bg-transparent p-0;
+  font-weight: 400;
+}
+
+.prose ul, .prose ol {
+  @apply my-5 pl-6;
+}
+
+.prose li {
+  @apply mb-2;
+}
+
+.prose ul li {
+  @apply list-disc;
+}
+
+.prose ol li {
+  @apply list-decimal;
+}
+
+.prose strong {
+  @apply font-semibold;
+}
+
+.prose em {
+  @apply italic;
+}
+
+.prose a {
+  @apply text-primary hover:text-primary/80 underline underline-offset-2 decoration-primary/30 hover:decoration-primary/60 transition-colors;
+}
+
+.prose blockquote {
+  @apply border-l-2 border-primary/30 pl-5 italic my-6 text-muted-foreground;
+}
+
+.prose hr {
+  @apply my-8 border-border;
+}
+
+.prose table {
+  @apply w-full my-6 border-collapse text-sm;
+}
+
+.prose th, .prose td {
+  @apply border border-border px-4 py-3 text-left;
+}
+
+.prose th {
+  @apply bg-secondary/50 font-semibold;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+}
+
+/* Animations */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-soft {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out forwards;
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.5s ease-out forwards;
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 1.5s ease-in-out infinite;
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--muted)) 0%,
+    hsl(var(--secondary)) 50%,
+    hsl(var(--muted)) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.3);
+}
+
+/* Chat-specific styles */
+.chat-message-user {
+  animation: fade-in 0.3s ease-out forwards;
+}
+
+.chat-message-assistant {
+  animation: fade-in 0.4s ease-out forwards;
+}
+
+.chat-input-container {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* Focus styles */
+.focus-ring {
+  @apply outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-2 focus-visible:ring-offset-background;
 }

@@ -12,6 +12,8 @@ export interface ChatMessage {
   content: string;
   timestamp: Date;
   animations?: string[];  // Video URLs from animation tool
+  postAnimationContent?: string;  // Text that comes after animations
+  hasAnimationStarted?: boolean;  // Flag to track if we've seen a tool_start
   isStreaming?: boolean;
 }
 
@@ -211,19 +213,31 @@ export function useChat() {
   const handleSSEEvent = useCallback((event: SSEEvent, messageId: string) => {
     switch (event.type) {
       case "text":
-        // Append text to the assistant message
+        // Append text - if animation has started, append to postAnimationContent
         setState((prev) => ({
           ...prev,
-          messages: prev.messages.map((msg) =>
-            msg.id === messageId
-              ? { ...msg, content: msg.content + event.content }
-              : msg
-          ),
+          messages: prev.messages.map((msg) => {
+            if (msg.id !== messageId) return msg;
+
+            if (msg.hasAnimationStarted) {
+              // Text after animation goes to postAnimationContent
+              return {
+                ...msg,
+                postAnimationContent: (msg.postAnimationContent || "") + event.content,
+              };
+            } else {
+              // Text before any animation goes to content
+              return {
+                ...msg,
+                content: msg.content + event.content,
+              };
+            }
+          }),
         }));
         break;
 
       case "tool_start":
-        // Add to pending animations
+        // Add to pending animations and mark that animation has started
         setState((prev) => ({
           ...prev,
           pendingAnimations: [
@@ -234,6 +248,11 @@ export function useChat() {
               concept: (event.arguments as { concept?: string })?.concept,
             },
           ],
+          messages: prev.messages.map((msg) =>
+            msg.id === messageId
+              ? { ...msg, hasAnimationStarted: true }
+              : msg
+          ),
         }));
         break;
 

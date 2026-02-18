@@ -1,14 +1,61 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Card, CardContent } from "@/components/ui/card";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
 import { useChat, ChatMessage, PendingAnimation } from "@/hooks/useChat";
-import { Loader2, Send, Sparkles, Video } from "lucide-react";
+import { useSmartScroll } from "@/hooks/useSmartScroll";
+import {
+  ArrowUp,
+  BookOpen,
+  Loader2,
+  RotateCcw,
+  Video,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+
+// Custom sparkle icon matching the reference image
+function SparkleIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      {/* Main 4-point star */}
+      <path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4" />
+    </svg>
+  );
+}
+
+// Animated sparkle with small accent star
+function AnimatedSparkle({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+    >
+      {/* Main star */}
+      <path
+        d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z"
+        fill="currentColor"
+      />
+      {/* Small accent star */}
+      <path
+        d="M19 2L19.5 4L21.5 4.5L19.5 5L19 7L18.5 5L16.5 4.5L18.5 4L19 2Z"
+        fill="currentColor"
+        opacity="0.6"
+      />
+    </svg>
+  );
+}
 
 export default function ChatPage() {
   const {
@@ -22,12 +69,11 @@ export default function ChatPage() {
   } = useChat();
 
   const [input, setInput] = useState("");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to bottom when messages update
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, pendingAnimations]);
+  const { containerRef } = useSmartScroll({
+    threshold: 100,
+    dependencies: [messages, pendingAnimations],
+  });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,205 +83,311 @@ export default function ChatPage() {
     setInput("");
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-white flex flex-col">
-      {/* Header */}
-      <header className="border-b px-6 py-4">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-white" />
+    <div className="h-screen flex flex-col bg-background">
+      {/* Minimal Header */}
+      <header className="flex-shrink-0 border-b border-border/60 bg-background/80 backdrop-blur-sm">
+        <div className="max-w-3xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-9 h-9 rounded-xl bg-secondary flex items-center justify-center">
+                  <BookOpen className="w-4 h-4 text-foreground/70" />
+                </div>
+                {sessionId && (
+                  <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-primary border-2 border-background" />
+                )}
+              </div>
+              <div>
+                <h1 className="font-semibold text-foreground tracking-tight">
+                  Lesson Loom
+                </h1>
+                <p className="text-xs text-muted-foreground">
+                  {sessionId ? "Session active" : "Ready to learn"}
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="font-semibold text-gray-900">Learning Assistant</h1>
-              <p className="text-sm text-gray-500">
-                {sessionId ? `Session: ${sessionId.slice(0, 8)}...` : "New session"}
-              </p>
-            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={reset}
+              className="text-muted-foreground hover:text-foreground gap-1.5"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">New chat</span>
+            </Button>
           </div>
-          <Button variant="outline" size="sm" onClick={reset}>
-            New Chat
-          </Button>
         </div>
       </header>
 
-      {/* Messages Area */}
-      <main className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto px-6 py-8">
-          {/* Empty state */}
-          {messages.length === 0 && (
-            <div className="text-center py-20">
-              <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
-                <Sparkles className="w-10 h-10 text-blue-500" />
-              </div>
-              <h2 className="text-2xl font-semibold text-gray-900 mb-2">
-                What would you like to learn?
-              </h2>
-              <p className="text-gray-500 max-w-md mx-auto">
-                Ask me about any technical concept - machine learning, math, algorithms, and more. I can explain with text and generate animations when they help.
-              </p>
+      {/* Messages Area - scrollable */}
+      <main className="flex-1 overflow-hidden relative">
+        <div
+          ref={containerRef}
+          className="h-full overflow-y-auto"
+        >
+          <div className="max-w-3xl mx-auto px-6 py-8 pb-36">
+            {/* Empty state */}
+            {messages.length === 0 && (
+              <div className="animate-fade-in-up">
+                <div className="text-center py-16">
+                  {/* Icon */}
+                  <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-secondary mb-6">
+                    <AnimatedSparkle className="w-6 h-6 text-foreground/70" />
+                  </div>
 
-              {/* Suggested prompts */}
-              <div className="mt-8 flex flex-wrap justify-center gap-3">
-                {[
-                  "Explain gradient descent",
-                  "How does backpropagation work?",
-                  "What is a neural network?",
-                  "Explain matrix multiplication visually",
-                ].map((prompt) => (
-                  <Button
-                    key={prompt}
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setInput(prompt);
-                      sendMessage(prompt);
-                    }}
-                    className="text-gray-600"
-                  >
-                    {prompt}
-                  </Button>
-                ))}
+                  {/* Title */}
+                  <h2 className="text-2xl font-semibold text-foreground mb-3 tracking-tight">
+                    What would you like to learn?
+                  </h2>
+
+                  {/* Description */}
+                  <p className="text-muted-foreground max-w-md mx-auto leading-relaxed">
+                    Ask about any technical concept. I&apos;ll explain it clearly and
+                    generate visual animations when they help illustrate the idea.
+                  </p>
+
+                  {/* Suggested prompts */}
+                  <div className="mt-10 flex flex-wrap justify-center gap-2">
+                    {[
+                      "Explain gradient descent",
+                      "How does backpropagation work?",
+                      "What is a neural network?",
+                      "Explain matrix multiplication",
+                    ].map((prompt, index) => (
+                      <button
+                        key={prompt}
+                        onClick={() => {
+                          setInput(prompt);
+                          sendMessage(prompt);
+                        }}
+                        className="group px-4 py-2.5 rounded-full border border-border hover:border-primary/30 bg-card hover:bg-secondary/50 transition-all duration-200 text-sm text-muted-foreground hover:text-foreground"
+                        style={{ animationDelay: `${index * 75}ms` }}
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
+            )}
+
+            {/* Messages */}
+            <div className="space-y-8">
+              {messages.map((message, index) => (
+                <MessageRow
+                  key={message.id}
+                  message={message}
+                  pendingAnimations={
+                    message.role === "assistant" && message.isStreaming
+                      ? pendingAnimations
+                      : []
+                  }
+                  isLatest={index === messages.length - 1}
+                />
+              ))}
             </div>
-          )}
-
-          {/* Messages */}
-          <div className="space-y-6">
-            {messages.map((message) => (
-              <MessageBubble
-                key={message.id}
-                message={message}
-                pendingAnimations={
-                  message.role === "assistant" && message.isStreaming
-                    ? pendingAnimations
-                    : []
-                }
-              />
-            ))}
-
-            {/* Scroll anchor */}
-            <div ref={messagesEndRef} />
           </div>
         </div>
+
       </main>
 
       {/* Error display */}
       {error && (
-        <div className="max-w-4xl mx-auto px-6 pb-4">
-          <Card className="border-red-200 bg-red-50">
-            <CardContent className="py-3">
-              <p className="text-red-600 text-sm">{error}</p>
+        <div className="fixed bottom-32 left-1/2 -translate-x-1/2 z-20 max-w-md w-full px-6">
+          <Card className="border-destructive/30 bg-destructive/5 shadow-lg">
+            <CardContent className="py-3 px-4">
+              <p className="text-destructive text-sm">{error}</p>
             </CardContent>
           </Card>
         </div>
       )}
 
-      {/* Input area */}
-      <div className="border-t bg-white">
-        <div className="max-w-4xl mx-auto px-6 py-4">
-          <form onSubmit={handleSubmit} className="flex gap-3">
-            <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask a question..."
-              disabled={isStreaming}
-              className="flex-1"
-            />
-            <Button
-              type="submit"
-              disabled={!input.trim() || isStreaming}
-              className="px-4"
-            >
-              {isStreaming ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <Send className="w-5 h-5" />
-              )}
-            </Button>
-          </form>
+      {/* Fixed Input Area */}
+      <div className="fixed bottom-0 left-0 right-0 z-10">
+        {/* Gradient fade */}
+        <div className="h-12 bg-gradient-to-t from-background via-background/80 to-transparent pointer-events-none" />
+
+        {/* Input container */}
+        <div className="bg-background pb-6 pt-0">
+          <div className="max-w-3xl mx-auto px-6">
+            <form onSubmit={handleSubmit} className="relative">
+              {/* Pill-shaped input container */}
+              <div className="relative flex items-center gap-2 p-1.5 pl-2 rounded-full bg-card border border-border shadow-sm focus-within:border-primary/30 focus-within:shadow-md transition-all duration-200">
+                {/* Textarea */}
+                <textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Ask a question..."
+                  disabled={isStreaming}
+                  rows={1}
+                  className="flex-1 resize-none bg-transparent py-2.5 pl-4 text-foreground placeholder:text-muted-foreground/50 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed text-[15px] leading-relaxed max-h-32 overflow-y-auto"
+                  style={{
+                    minHeight: "40px",
+                    height: "auto",
+                  }}
+                  onInput={(e) => {
+                    const target = e.target as HTMLTextAreaElement;
+                    target.style.height = "auto";
+                    target.style.height = `${Math.min(target.scrollHeight, 128)}px`;
+                  }}
+                />
+
+                {/* Submit button - circular to match pill shape */}
+                <button
+                  type="submit"
+                  disabled={!input.trim() || isStreaming}
+                  className="flex-shrink-0 w-9 h-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:bg-primary/90 active:scale-95 transition-all duration-150"
+                >
+                  {isStreaming ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <ArrowUp className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+
+              {/* Helper text */}
+              <p className="text-[11px] text-muted-foreground/40 text-center mt-2.5">
+                Enter to send · Shift + Enter for new line
+              </p>
+            </form>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-// Message Bubble Component
-function MessageBubble({
+// Message Row Component
+function MessageRow({
   message,
   pendingAnimations,
+  isLatest,
 }: {
   message: ChatMessage;
   pendingAnimations: PendingAnimation[];
+  isLatest: boolean;
 }) {
   const isUser = message.role === "user";
 
-  return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`max-w-[85%] rounded-2xl px-5 py-4 ${
-          isUser
-            ? "bg-blue-500 text-white"
-            : "bg-gray-100 text-gray-900"
-        }`}
-      >
-        {/* Message content */}
-        {isUser ? (
-          <p>{message.content}</p>
-        ) : (
-          <div className="prose prose-sm max-w-none">
-            <ReactMarkdown
-              remarkPlugins={[remarkMath]}
-              rehypePlugins={[rehypeKatex]}
-            >
+  if (isUser) {
+    return (
+      <div className="chat-message-user flex justify-end">
+        <div className="max-w-[85%]">
+          <div className="bg-secondary rounded-2xl rounded-br-md px-4 py-3">
+            <p className="text-foreground whitespace-pre-wrap leading-relaxed">
               {message.content}
-            </ReactMarkdown>
-
-            {/* Streaming indicator */}
-            {message.isStreaming && (
-              <span className="inline-block w-2 h-4 bg-gray-400 animate-pulse ml-1" />
-            )}
+            </p>
           </div>
-        )}
+        </div>
+      </div>
+    );
+  }
 
-        {/* Pending animations */}
-        {pendingAnimations.length > 0 && (
-          <div className="mt-4 space-y-2">
-            {pendingAnimations.map((anim) => (
-              <div
-                key={anim.id}
-                className="flex items-center gap-2 text-sm text-gray-500 bg-white/50 rounded-lg px-3 py-2"
-              >
-                <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-                <span>Generating animation{anim.concept ? `: ${anim.concept}` : ""}...</span>
-              </div>
-            ))}
+  // Assistant message
+  const hasAnimations =
+    (message.animations && message.animations.length > 0) ||
+    pendingAnimations.length > 0;
+
+  return (
+    <div className="chat-message-assistant">
+      <div className="flex gap-3">
+        {/* Icon - clean sparkle in rounded square */}
+        <div className="flex-shrink-0 pt-1">
+          <div className="w-8 h-8 rounded-xl bg-secondary flex items-center justify-center">
+            <AnimatedSparkle className="w-4 h-4 text-foreground/60" />
           </div>
-        )}
+        </div>
 
-        {/* Completed animations */}
-        {message.animations && message.animations.length > 0 && (
-          <div className="mt-4 space-y-3">
-            {message.animations.map((videoUrl, idx) => (
-              <div
-                key={`${message.id}-video-${idx}`}
-                className="rounded-lg overflow-hidden bg-gray-900"
+        {/* Content */}
+        <div className="flex-1 min-w-0 space-y-4">
+          {/* Main content */}
+          {message.content && (
+            <div className="prose max-w-none">
+              <ReactMarkdown
+                remarkPlugins={[remarkMath]}
+                rehypePlugins={[rehypeKatex]}
               >
-                <div className="flex items-center gap-2 px-3 py-2 bg-gray-800 text-gray-300 text-sm">
-                  <Video className="w-4 h-4" />
-                  <span>Animation</span>
+                {message.content}
+              </ReactMarkdown>
+            </div>
+          )}
+
+          {/* Pending animations */}
+          {pendingAnimations.length > 0 && (
+            <div className="space-y-3">
+              {pendingAnimations.map((anim) => (
+                <div
+                  key={anim.id}
+                  className="rounded-xl bg-secondary/50 aspect-video max-w-2xl flex items-center justify-center animate-shimmer"
+                >
+                  <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                    <div className="w-10 h-10 rounded-xl bg-card flex items-center justify-center">
+                      <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                    </div>
+                    <span className="text-sm font-medium">
+                      {anim.concept
+                        ? `Generating: ${anim.concept}`
+                        : "Generating animation..."}
+                    </span>
+                  </div>
                 </div>
-                <video
-                  src={videoUrl}
-                  controls
-                  className="w-full"
-                  autoPlay
-                  muted
-                />
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+
+          {/* Completed animations */}
+          {message.animations && message.animations.length > 0 && (
+            <div className="space-y-4">
+              {message.animations.map((videoUrl, idx) => (
+                <div
+                  key={`${message.id}-video-${idx}`}
+                  className="rounded-xl overflow-hidden bg-[#101014] max-w-2xl shadow-lg"
+                  style={{ contain: "layout" }}
+                >
+                  <div className="flex items-center gap-2 px-4 py-2.5 bg-[#18181c] text-gray-400 text-sm border-b border-white/5">
+                    <Video className="w-4 h-4" />
+                    <span className="font-medium">Animation</span>
+                  </div>
+                  <video
+                    src={videoUrl}
+                    controls
+                    className="w-full aspect-video object-contain"
+                    autoPlay
+                    muted
+                    playsInline
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Post-animation content */}
+          {message.postAnimationContent && (
+            <div className="prose max-w-none">
+              <ReactMarkdown
+                remarkPlugins={[remarkMath]}
+                rehypePlugins={[rehypeKatex]}
+              >
+                {message.postAnimationContent}
+              </ReactMarkdown>
+            </div>
+          )}
+
+          {/* Streaming cursor */}
+          {message.isStreaming && isLatest && (
+            <span className="inline-block w-0.5 h-5 bg-foreground/70 animate-pulse-soft align-middle ml-0.5" />
+          )}
+        </div>
       </div>
     </div>
   );
