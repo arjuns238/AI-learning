@@ -96,7 +96,7 @@ class EducationalAgent:
 
     def __init__(
         self,
-        api_provider: str = "openai",
+        api_provider: str = "anthropic",
         model: Optional[str] = None,
         video_resolution: str = "480p15"
     ):
@@ -147,6 +147,7 @@ class EducationalAgent:
         async def generate_animation(
             concept: str,
             context: str,
+            animation_description: str,
             focus_area: Optional[str] = None,
             duration_hint: Optional[str] = None
         ) -> Dict[str, Any]:
@@ -166,12 +167,28 @@ class EducationalAgent:
             Args:
                 concept: The specific concept to visualize (e.g., 'gradient descent optimization')
                 context: What the user is trying to understand - provides context for the animation
+                animation_description: A detailed 2-3 sentence description of what to animate.
+                    Be SPECIFIC about visual elements, motion, and spatial relationships.
+                    Good: 'Show a 3D bowl-shaped loss surface. Place a ball at a high point.
+                    Animate the ball rolling downhill following gradient arrows. Leave a trail.'
+                    Bad: 'Visualize gradient descent.' - too vague, produces poor animation.
                 focus_area: Optional specific part to emphasize if the user had confusion
                 duration_hint: Optional 'short' (5-10s) or 'detailed' (15-30s) animation
             """
+            # Debug: Print what the LLM passed to the tool
+            print(f"\n{'='*60}", flush=True)
+            print(f"TOOL CALLED: generate_animation", flush=True)
+            print(f"  concept: {concept}", flush=True)
+            print(f"  context: {context}", flush=True)
+            print(f"  animation_description: {animation_description}", flush=True)
+            print(f"  focus_area: {focus_area}", flush=True)
+            print(f"  duration_hint: {duration_hint}", flush=True)
+            print(f"{'='*60}\n", flush=True)
+
             result = await animation_tool_instance.execute(
                 concept=concept,
                 context=context,
+                animation_description=animation_description,
                 focus_area=focus_area,
                 duration_hint=duration_hint
             )

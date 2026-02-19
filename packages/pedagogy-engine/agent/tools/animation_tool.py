@@ -76,6 +76,16 @@ Do NOT use this tool when:
                 "type": "string",
                 "description": "What the user is trying to understand - provides context for the animation"
             },
+            "animation_description": {
+                "type": "string",
+                "description": (
+                    "A detailed 2-3 sentence description of what to animate. "
+                    "Be SPECIFIC about visual elements, motion, and spatial relationships. "
+                    "Good example: 'Show a 3D bowl-shaped loss surface. Place a ball at a high point. "
+                    "Animate the ball rolling downhill following gradient arrows. Leave a trail showing the optimization path.' "
+                    "Bad example: 'Visualize gradient descent.' - too vague, will produce poor animation."
+                )
+            },
             "focus_area": {
                 "type": "string",
                 "description": "Optional: specific part to emphasize if the user had confusion about a particular aspect"
@@ -86,7 +96,7 @@ Do NOT use this tool when:
                 "description": "Optional: 'short' for 5-10 second focused animation, 'detailed' for 15-30 second comprehensive animation"
             }
         },
-        "required": ["concept", "context"]
+        "required": ["concept", "context", "animation_description"]
     }
 
     def __init__(
@@ -140,6 +150,7 @@ Do NOT use this tool when:
         self,
         concept: str,
         context: str,
+        animation_description: str,
         focus_area: Optional[str] = None
     ) -> tuple["PedagogicalIntent", "PedagogicalSection"]:
         """
@@ -147,20 +158,23 @@ Do NOT use this tool when:
 
         Since we're generating a single focused animation (not a full lesson),
         we create a simplified structure that Layer 3 can work with.
+
+        The animation_description is provided directly by the agent, which has
+        full conversation context and can generate rich, specific descriptions.
         """
         # Lazy import layer1 schema (lightweight but keeps imports consistent)
         from layer1.schema import PedagogicalIntent, PedagogicalSection, VisualHint
 
-        # Build animation description
-        animation_description = f"Visualize {concept}."
-        if focus_area:
-            animation_description += f" Focus specifically on: {focus_area}."
-        animation_description += f" Context: {context}"
+        # Use the agent-provided animation description directly
+        # If too short/vague, enhance with focus area context
+        final_description = animation_description
+        if len(animation_description) < 50 and focus_area:
+            final_description += f" Focus specifically on: {focus_area}."
 
         # Create the visual hint
         visual_hint = VisualHint(
             should_animate=True,
-            animation_description=animation_description,
+            animation_description=final_description,
             duration_hint=15  # Default duration
         )
 
@@ -185,6 +199,7 @@ Do NOT use this tool when:
         self,
         concept: str,
         context: str,
+        animation_description: str,
         focus_area: Optional[str] = None,
         duration_hint: Optional[str] = None
     ) -> AnimationResult:
@@ -193,8 +208,10 @@ Do NOT use this tool when:
         Called from async context via executor.
         """
         try:
-            # Create minimal intent and section
-            intent, section = self._create_minimal_intent(concept, context, focus_area)
+            # Create minimal intent and section using the agent-provided animation description
+            intent, section = self._create_minimal_intent(
+                concept, context, animation_description, focus_area
+            )
 
             # Adjust duration based on hint
             if duration_hint == "short":
@@ -204,6 +221,9 @@ Do NOT use this tool when:
 
             print(f"\n{'='*60}")
             print(f"ANIMATION TOOL: Generating animation for '{concept}'")
+            print(f"{'='*60}")
+            print(f"Animation Description (from LLM):")
+            print(f"  {animation_description}")
             print(f"{'='*60}")
 
             # Layer 3: Generate Manim prompt
@@ -276,6 +296,7 @@ Do NOT use this tool when:
         self,
         concept: str,
         context: str,
+        animation_description: str,
         focus_area: Optional[str] = None,
         duration_hint: Optional[str] = None
     ) -> AnimationResult:
@@ -293,6 +314,7 @@ Do NOT use this tool when:
             self._execute_sync,
             concept,
             context,
+            animation_description,
             focus_area,
             duration_hint
         )
