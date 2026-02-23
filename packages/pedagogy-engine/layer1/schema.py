@@ -173,6 +173,7 @@ class GenerationMetadata(BaseModel):
     temperature: float = Field(..., description="Temperature parameter used")
     generation_timestamp: str = Field(..., description="ISO timestamp of generation")
     version: str = Field(default="1.0.0", description="Schema version")
+    api_provider: Optional[str] = Field(None, description="API provider used (e.g., 'openai', 'anthropic')")
 
 
 class PedagogicalIntentWithMetadata(BaseModel):

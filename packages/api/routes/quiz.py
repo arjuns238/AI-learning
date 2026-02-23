@@ -114,10 +114,14 @@ async def generate_quiz(request: QuizGenerateRequest):
     try:
         start_time = time.time()
         
+        # Extract model info from request or pedagogical intent metadata
+        model_name = request.model_name or request.pedagogical_intent.metadata.model_name
+        api_provider = request.api_provider or request.pedagogical_intent.metadata.api_provider
+        
         # Get generator with specified model/provider if given
         generator = get_quiz_generator(
-            model_name=request.model_name,
-            api_provider=request.api_provider
+            model_name=model_name,
+            api_provider=api_provider
         )
         
         # Generate quiz from pedagogical intent
@@ -167,10 +171,14 @@ async def batch_generate_quizzes(request: BatchQuizGenerateRequest):
         if not request.intents:
             raise ValueError("No intents provided for batch generation")
         
+        # Extract model info from request or first intent's metadata
+        model_name = request.model_name or request.intents[0].metadata.model_name
+        api_provider = request.api_provider or request.intents[0].metadata.api_provider
+        
         # Get generator
         generator = get_quiz_generator(
-            model_name=request.model_name,
-            api_provider=request.api_provider
+            model_name=model_name,
+            api_provider=api_provider
         )
         
         # Generate quiz for each intent
