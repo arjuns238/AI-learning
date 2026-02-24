@@ -38,14 +38,23 @@ class QuizGenerator:
         api_provider: Optional[str] = None,
         temperature: float = 0.7
     ):
-        self.api_provider = api_provider or os.getenv("API_PROVIDER", "openai")
-
-        # Determine default model
+        # Determine default model first
         if model_name is None:
             model_name = os.getenv("DEFAULT_MODEL")
             if model_name is None:
-                model_name = "gpt-4o-mini" if self.api_provider == "openai" else "claude-sonnet-4-20250514"
+                model_name = "gpt-4o-mini" if api_provider != "anthropic" else "claude-opus-4-5"
         self.model_name = model_name
+
+        # Infer API provider from model name if not explicitly provided
+        if api_provider is None:
+            if self.model_name.startswith("gpt") or self.model_name.startswith("o1"):
+                api_provider = "openai"
+            elif self.model_name.startswith("claude"):
+                api_provider = "anthropic"
+            else:
+                api_provider = os.getenv("API_PROVIDER", "openai")
+        
+        self.api_provider = api_provider
         self.temperature = temperature
 
         # Initialize API client
