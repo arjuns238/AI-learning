@@ -68,6 +68,11 @@ class VideoExecutionResult(BaseModel):
         description="Stdout/stderr from Manim execution"
     )
 
+    cancelled: bool = Field(
+        default=False,
+        description="Whether the execution was cancelled by the user"
+    )
+
 
 class ManimExecutionWithMetadata(BaseModel):
     """

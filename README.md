@@ -1,155 +1,251 @@
-# AI Learning Platform
+# Lesson Loom
 
-An AI-powered learning system that separates pedagogical reasoning from visualization to create effective educational content for complex technical topics.
+An AI-powered learning assistant that teaches complex technical concepts through conversation and **dynamically generated visual animations**. Ask about machine learning, math, or physics — get clear explanations with custom Manim animations rendered on-the-fly.
+
+![Lesson Loom Demo](media/demo-placeholder.png)
+
+## Why This Project
+
+Most AI tutors generate text. Lesson Loom generates **videos**.
+
+The system uses an agentic architecture where an LLM tutor autonomously decides when a concept needs visual demonstration, then generates and renders a custom Manim animation in real-time. This required solving several interesting problems:
+
+- **Agentic tool use** — LangChain agent that invokes animation generation as a tool
+- **RAG-powered code generation** — Vector search over 1000+ Manim examples to improve code quality
+- **Real-time streaming** — SSE-based token streaming with concurrent video generation
+- **Graceful cancellation** — Interrupt in-progress LLM calls and subprocess execution
+
+**Example interaction:** Ask "How does gradient descent work?" and receive:
+1. A conversational explanation with LaTeX math rendering
+2. An auto-generated animation showing optimization on a loss surface
+3. Follow-up Q&A with full conversation context
+
+## Features
+
+- **Conversational Interface** — ChatGPT-style streaming responses via Server-Sent Events
+- **AI-Generated Animations** — Manim videos created on-demand when pedagogically useful
+- **Intelligent Tool Use** — Agent autonomously decides when visuals help understanding
+- **RAG-Enhanced Generation** — ChromaDB vector store improves Manim code quality
+- **Session Persistence** — Conversation context preserved across messages
+- **Request Cancellation** — Cancel in-flight requests including video rendering subprocesses
+- **Math Rendering** — LaTeX equations via KaTeX
 
 ## Architecture
 
-This monorepo contains four packages working together:
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Next.js Frontend                        │
+│              (React 19 · Tailwind v4 · KaTeX)                │
+└────────────────────────────┬────────────────────────────────┘
+                             │ SSE Streaming
+┌────────────────────────────▼────────────────────────────────┐
+│                      FastAPI Backend                         │
+│            (Session Management · Request Cancellation)       │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+┌────────────────────────────▼────────────────────────────────┐
+│                   Educational Agent (LangGraph)              │
+│                                                              │
+│   ┌────────────────────────────────────────────────────┐    │
+│   │              Animation Generation Tool              │    │
+│   │                                                     │    │
+│   │   Layer 3: Concept → Structured Manim Prompt       │    │
+│   │   Layer 4: Prompt → Code (RAG + LLM) → Video       │    │
+│   │                                                     │    │
+│   │   ChromaDB ──► Code Generation ──► ManimCE         │    │
+│   └────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────┘
+                             │
+                             ▼
+                    Supabase Storage
+                   (Video file hosting)
+```
+
+### Monorepo Structure
 
 ```
-ai-learning/
-├── packages/
-│   ├── pedagogy-engine/    # Python - AI pedagogy generation (Layer 1-3)
-│   ├── api/                # FastAPI - Backend bridge
-│   ├── web/                # Next.js - Frontend UI
-│   └── shared/             # TypeScript types (shared across packages)
-└── MONOREPO_MIGRATION.md   # Migration history and details
+packages/
+├── pedagogy-engine/     # Python — AI agent + animation pipeline
+│   ├── agent/           # LangGraph educational agent
+│   ├── layer3/          # Concept → Manim prompt generation
+│   ├── layer4/          # RAG + code generation + execution
+│   └── data/vectorstore # ChromaDB embeddings (Manim examples)
+├── api/                 # FastAPI — Streaming endpoints
+├── web/                 # Next.js — Chat interface
+└── shared/              # TypeScript type definitions
 ```
-
-## Core Philosophy
-
-Separate pedagogical reasoning (how people learn) from visualization (how content is displayed). This decomposition ensures learning quality is not entangled with animation or UI concerns.
-
-### Four-Layer Design
-
-1. **Layer 1: Topic → Pedagogical Intent** - Decide what understanding should change in the learner
-2. **Layer 2: Pedagogical Intent → Storyboard** - Sequence the explanation
-3. **Layer 3: Storyboard → Scene Spec DSL** - Compile into visual primitives
-4. **Layer 4: Scene Spec → Renderable Output** - Convert to Manim animations
 
 ## Quick Start
 
 ### Prerequisites
+
 - Node.js 18+
 - Python 3.9+
 - npm 9+
+- [ManimCE](https://docs.manim.community/en/stable/installation.html) (for video rendering)
 
 ### Installation
 
 ```bash
-# Install Node dependencies
+# Install Node dependencies (npm workspaces)
 npm install
 
 # Set up Python environment for pedagogy engine
 cd packages/pedagogy-engine
 python -m venv venv
-source venv/bin/activate  # On macOS/Linux
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 cd ../..
 
-# Set up Python environment for API
+# Install API dependencies
 cd packages/api
 pip install -r requirements.txt
 cd ../..
 
-# Configure OpenAI API keys
-cp packages/pedagogy-engine/.env.example packages/pedagogy-engine/.env
-cp packages/web/.env.example packages/web/.env.local
-# Edit both .env files and add your OPENAI_API_KEY
+# Configure environment variables
+cp .env.example .env
+# Edit .env and add:
+#   ANTHROPIC_API_KEY=sk-ant-...
+#   OPENAI_API_KEY=sk-...  (optional, for GPT models)
+#   SUPABASE_URL=...       (optional, for video storage)
+#   SUPABASE_KEY=...
 ```
 
-### Running the System
+### Running the Application
 
 ```bash
-# Run everything (web + API)
+# Run everything (recommended)
 npm run dev
 
 # Or run individually:
-npm run dev:web      # Next.js frontend only (http://localhost:3000)
-npm run dev:api      # FastAPI backend only (http://localhost:8000)
+npm run dev:web      # Next.js frontend (http://localhost:3000)
+npm run dev:api      # FastAPI backend (http://localhost:8000)
 ```
 
-Visit:
-- **Web App**: http://localhost:3000
-- **API**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs
+**URLs:**
+- **Chat Interface:** http://localhost:3000/chat
+- **API Documentation:** http://localhost:8000/docs
 
-### Generate Pedagogical Intent (CLI)
+## API Reference
+
+### Chat Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/chat/stream` | SSE streaming chat (primary endpoint) |
+| `POST` | `/api/chat` | Non-streaming chat response |
+| `POST` | `/api/chat/cancel` | Cancel in-progress request |
+| `GET` | `/api/chat/session/:id` | Retrieve session history |
+| `DELETE` | `/api/chat/session/:id` | Delete session |
+| `POST` | `/api/chat/session/new` | Create new session |
+
+### SSE Event Types
+
+```typescript
+{ type: "text", content: "..." }                    // Streamed text token
+{ type: "tool_start", tool: "generate_animation", id: "..." }  // Animation started
+{ type: "tool_result", tool: "...", result: { video_url } }    // Animation ready
+{ type: "done", session_id: "..." }                 // Stream complete
+{ type: "cancelled", session_id: "..." }            // Request cancelled
+{ type: "error", message: "..." }                   // Error occurred
+```
+
+## How Animation Generation Works
+
+When the agent determines a visual would help understanding:
+
+1. **Layer 3 (Prompt Generation)** — Converts concept + context into a structured Manim prompt with specific visual elements, motion descriptions, and timing
+
+2. **Layer 4 (Code Generation)** — RAG retrieval over 1000+ Manim examples → LLM generates Python code → AST validation → execution with ManimCE
+
+3. **Delivery** — Video uploaded to Supabase Storage → signed URL streamed to frontend
+
+**The agent autonomously decides when to invoke this tool based on:**
+- Spatial/visual concepts (transformations, graphs, geometric relationships)
+- User confusion signals in conversation
+- Explicit visualization requests
+- Processes that unfold over time (algorithms, state machines)
+
+## Tech Stack
+
+### Backend
+| Technology | Purpose |
+|------------|---------|
+| Python 3.9+ | Runtime |
+| FastAPI | REST API + SSE streaming |
+| LangChain / LangGraph | Agent orchestration |
+| Claude Sonnet 4.5 | Primary LLM (configurable) |
+| ManimCE | Animation rendering |
+| ChromaDB | Vector store for RAG |
+| Sentence Transformers | Embeddings |
+| Supabase | Video storage + (planned) auth |
+
+### Frontend
+| Technology | Purpose |
+|------------|---------|
+| Next.js 16 | React framework |
+| React 19 | UI library |
+| TypeScript 5 | Type safety |
+| Tailwind CSS v4 | Styling |
+| KaTeX | Math rendering |
+| ReactMarkdown | Content rendering |
+
+## Development
+
+### Commands
 
 ```bash
+# Development
+npm run dev           # Run web + api concurrently
+npm run dev:web       # Next.js only (localhost:3000)
+npm run dev:api       # FastAPI only (localhost:8000)
+
+# Build
+npm run build         # Build all packages
+
+# Testing
 cd packages/pedagogy-engine
-source venv/bin/activate
-python -m layer1.generator --topic "Backpropagation in Neural Networks"
-```
+pytest                # Run all tests
+pytest tests/layer4/  # Test animation pipeline
+pytest --cov=agent --cov-report=html  # Coverage report
 
-## Package Overview
-
-### packages/pedagogy-engine
-The core AI system for generating pedagogical content. Contains:
-- **layer1/** - Pedagogical intent generation (OpenAI/Claude integration)
-- **layer2/** - Storyboard generation (planned)
-- **layer3/** - Scene spec DSL (planned)
-- **data/exemplars.json** - Few-shot learning exemplars
-- **prompts/** - Prompt templates
-- **output/** - Generated pedagogical intents
-
-See [packages/pedagogy-engine/CLAUDE.md](packages/pedagogy-engine/CLAUDE.md) for detailed documentation.
-
-### packages/api
-FastAPI backend that bridges the Python pedagogy engine with the TypeScript web frontend.
-
-**Endpoints:**
-- `POST /api/generate` - Generate pedagogical intent from topic
-- `POST /api/generate/batch` - Batch generation
-- `POST /api/lessons/from-intent` - Convert PedagogicalIntent → Lesson format
-
-### packages/web
-Next.js web application with interactive visualizations.
-
-**Features:**
-- Lesson rendering with multiple visual types (plots, diagrams, attention heatmaps)
-- Interactive quizzes
-- Mermaid diagram support
-- Responsive UI with Tailwind CSS
-
-### packages/shared
-Shared TypeScript type definitions that mirror Python Pydantic schemas.
-- `pedagogical-intent.ts` - Matches layer1/schema.py
-- `lesson.ts` - Web app lesson format
-
-## Development Commands
-
-```bash
-# Install dependencies
-npm install
-
-# Build all packages
-npm run build
-
-# Run tests
-npm run test
-
-# Run linting
+# Linting
 npm run lint
-
-# Clean all build artifacts
-npm run clean
 ```
 
-## Documentation
+### Project Structure Deep Dive
 
-- [CLAUDE.md](packages/pedagogy-engine/CLAUDE.md) - Complete project documentation
-- [STATUS.md](packages/pedagogy-engine/STATUS.md) - Current status and next steps
-- [GETTING_STARTED.md](packages/pedagogy-engine/GETTING_STARTED.md) - Getting started guide
-- [MONOREPO_MIGRATION.md](MONOREPO_MIGRATION.md) - Migration history
+```
+packages/pedagogy-engine/
+├── agent/
+│   ├── educational_agent.py   # LangGraph agent with tool calling
+│   ├── schema.py              # Pydantic models for events/messages
+│   └── tools/
+│       └── animation_tool.py  # Wraps Layer 3+4 as LangChain tool
+├── layer3/
+│   └── generator.py           # Concept → Manim prompt
+├── layer4/
+│   ├── generator.py           # RAG + LLM → Manim code → video
+│   └── manim_api_reference.py # Curated API docs for prompting
+├── prompts/
+│   └── agent_system_prompt.txt # Educational agent behavior
+└── data/
+    └── vectorstore/           # ChromaDB with Manim examples
+```
 
-## Project Status
+## Roadmap
 
-Currently in **Phase 1** (Months 0-3):
-- Layer 1 (Pedagogical Intent Generation) is operational
-- Using prompt engineering + few-shot exemplars with GPT-4/Claude
-- Building expert review pipeline
-- Targeting 50+ high-quality topics with 80%+ expert approval
+- [x] Streaming conversational agent (LangGraph)
+- [x] Animation generation as agentic tool
+- [x] RAG over Manim examples (ChromaDB)
+- [x] Session persistence with context
+- [x] Request cancellation (including subprocesses)
+- [x] SSE streaming with tool call events
+- [ ] User authentication (Supabase Auth)
+- [ ] Conversation history persistence
+- [ ] Fine-tuned pedagogy model
+- [ ] Learner progress tracking
+- [ ] Multi-modal input (diagrams, images)
 
 ## License
 

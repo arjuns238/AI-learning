@@ -10,6 +10,7 @@ import {
   BookOpen,
   Loader2,
   RotateCcw,
+  Square,
   Video,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -66,6 +67,7 @@ export default function ChatPage() {
     error,
     sendMessage,
     reset,
+    cancel,
   } = useChat();
 
   const [input, setInput] = useState("");
@@ -165,7 +167,6 @@ export default function ChatPage() {
                       <button
                         key={prompt}
                         onClick={() => {
-                          setInput(prompt);
                           sendMessage(prompt);
                         }}
                         className="group px-4 py-2.5 rounded-full border border-border hover:border-primary/30 bg-card hover:bg-secondary/50 transition-all duration-200 text-sm text-muted-foreground hover:text-foreground"
@@ -241,18 +242,24 @@ export default function ChatPage() {
                   }}
                 />
 
-                {/* Submit button - circular to match pill shape */}
-                <button
-                  type="submit"
-                  disabled={!input.trim() || isStreaming}
-                  className="flex-shrink-0 w-9 h-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:bg-primary/90 active:scale-95 transition-all duration-150"
-                >
-                  {isStreaming ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
+                {/* Submit/Stop button - circular to match pill shape */}
+                {isStreaming ? (
+                  <button
+                    type="button"
+                    onClick={cancel}
+                    className="flex-shrink-0 w-9 h-9 rounded-full bg-secondary text-foreground flex items-center justify-center hover:bg-secondary/80 active:scale-95 transition-all duration-150"
+                  >
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={!input.trim()}
+                    className="flex-shrink-0 w-9 h-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:bg-primary/90 active:scale-95 transition-all duration-150"
+                  >
                     <ArrowUp className="w-4 h-4" />
-                  )}
-                </button>
+                  </button>
+                )}
               </div>
 
               {/* Helper text */}
@@ -294,10 +301,6 @@ function MessageRow({
   }
 
   // Assistant message
-  const hasAnimations =
-    (message.animations && message.animations.length > 0) ||
-    pendingAnimations.length > 0;
-
   return (
     <div className="chat-message-assistant">
       <div className="flex gap-3">

@@ -152,6 +152,7 @@ class AnimationResult:
     video_path: Optional[str] = None
     error: Optional[str] = None
     execution_time_seconds: float = 0.0
+    cancelled: bool = False  # True if cancelled by user
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -159,7 +160,8 @@ class AnimationResult:
             "video_url": self.video_url,
             "video_path": self.video_path,
             "error": self.error,
-            "execution_time_seconds": self.execution_time_seconds
+            "execution_time_seconds": self.execution_time_seconds,
+            "cancelled": self.cancelled
         }
 
 

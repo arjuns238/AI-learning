@@ -2,10 +2,12 @@
 Chat API Routes: Streaming conversational interface for the educational agent
 
 Provides SSE (Server-Sent Events) streaming for real-time chat with the agent.
+Supports cancellation of in-progress requests including video generation.
 """
 
 import json
 import uuid
+import asyncio
 import threading
 from typing import Optional, Dict, Any, List
 from datetime import datetime
@@ -22,6 +24,11 @@ router = APIRouter()
 
 # In-memory session store (replace with Supabase in production)
 sessions: Dict[str, Session] = {}
+
+# Track active requests for cancellation support
+# Maps session_id -> asyncio.Event (set when cancellation requested)
+active_requests: Dict[str, asyncio.Event] = {}
+active_requests_lock = threading.Lock()
 
 # Singleton agent instance - created once, reused across all requests
 # This avoids the 400-1000ms overhead of creating a new agent per message
@@ -81,11 +88,18 @@ async def chat_stream(request: ChatRequest):
     - tool_start: Agent is calling a tool {"type": "tool_start", "tool": "...", "id": "..."}
     - tool_result: Tool completed {"type": "tool_result", "tool": "...", "result": {...}}
     - done: Stream complete {"type": "done", "session_id": "..."}
+    - cancelled: Request was cancelled {"type": "cancelled", "session_id": "..."}
     - error: Error occurred {"type": "error", "message": "..."}
     """
     session = get_or_create_session(request.session_id)
 
+    # Create cancellation event for this request
+    cancel_event = asyncio.Event()
+    with active_requests_lock:
+        active_requests[session.session_id] = cancel_event
+
     async def event_generator():
+        cancelled = False
         try:
             agent = get_agent()
 
@@ -100,8 +114,15 @@ async def chat_stream(request: ChatRequest):
                 message=request.message,
                 conversation_history=session.messages,
                 learner_context=session.learner_context,
-                session=session
+                session=session,
+                cancel_event=cancel_event  # Pass cancellation event to agent
             ):
+                # Check for cancellation before processing each event
+                if cancel_event.is_set():
+                    print(f"🛑 Request cancelled for session {session.session_id}")
+                    cancelled = True
+                    break
+
                 if isinstance(event, TextChunk):
                     full_response += event.content
                     yield f"data: {json.dumps({'type': 'text', 'content': event.content})}\n\n"
@@ -112,6 +133,11 @@ async def chat_stream(request: ChatRequest):
                     yield f"data: {json.dumps({'type': 'tool_start', 'tool': event.name, 'id': event.id, 'arguments': event.arguments})}\n\n"
 
                 elif isinstance(event, ToolResult):
+                    # Check if this is a cancellation result
+                    if event.result.get("cancelled"):
+                        cancelled = True
+                        break
+
                     # Track tool result for session history
                     tool_results_received.append(event)
 
@@ -164,8 +190,17 @@ async def chat_stream(request: ChatRequest):
 
                     yield f"data: {json.dumps({'type': 'done', 'session_id': session.session_id})}\n\n"
 
+            # If cancelled, send cancellation event
+            if cancelled:
+                yield f"data: {json.dumps({'type': 'cancelled', 'session_id': session.session_id})}\n\n"
+
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+        finally:
+            # Clean up the active request tracking
+            with active_requests_lock:
+                active_requests.pop(session.session_id, None)
 
     return StreamingResponse(
         event_generator(),
@@ -176,6 +211,37 @@ async def chat_stream(request: ChatRequest):
             "X-Accel-Buffering": "no"  # Disable buffering in nginx
         }
     )
+
+
+class CancelRequest(BaseModel):
+    """Request body for cancel endpoint."""
+    session_id: str
+
+
+@router.post("/cancel")
+async def cancel_stream(request: CancelRequest):
+    """
+    Cancel an in-progress streaming request.
+
+    This will:
+    - Stop the agent from generating more content
+    - Terminate any running video generation subprocess
+    - Clean up resources
+    """
+    session_id = request.session_id
+
+    with active_requests_lock:
+        cancel_event = active_requests.get(session_id)
+
+    if cancel_event is None:
+        # No active request for this session - might have already completed
+        return {"status": "no_active_request", "session_id": session_id}
+
+    # Signal cancellation
+    cancel_event.set()
+    print(f"🛑 Cancel requested for session {session_id}")
+
+    return {"status": "cancelled", "session_id": session_id}
 
 
 @router.post("")

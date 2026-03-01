@@ -14,6 +14,7 @@ property getters where they're actually needed.
 import asyncio
 import uuid
 import os
+import threading
 from pathlib import Path
 from typing import Optional, Dict, Any, TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor
@@ -124,6 +125,38 @@ Do NOT use this tool when:
         self._layer4 = None
         self._executor = ThreadPoolExecutor(max_workers=1)
 
+        # Cancellation support
+        self._cancel_event: Optional[asyncio.Event] = None
+        self._cancel_threading_event: Optional[threading.Event] = None
+
+    def set_cancel_event(self, cancel_event: asyncio.Event) -> None:
+        """
+        Set the cancellation event for this tool.
+
+        Called by the agent before tool execution to enable cancellation
+        of long-running video generation.
+        """
+        self._cancel_event = cancel_event
+        # Create a threading.Event that mirrors the asyncio.Event
+        # so we can check it from the synchronous execution thread
+        self._cancel_threading_event = threading.Event()
+
+    def _is_cancelled(self) -> bool:
+        """Check if cancellation has been requested."""
+        # Check both events - asyncio event from main thread, threading event for sync code
+        if self._cancel_threading_event is not None and self._cancel_threading_event.is_set():
+            return True
+        # Note: can't directly check asyncio.Event from non-async context,
+        # but we sync the state at key checkpoints
+        return False
+
+    def _sync_cancel_state(self) -> None:
+        """Sync the asyncio cancel event state to the threading event."""
+        if self._cancel_event is not None and self._cancel_threading_event is not None:
+            # Check asyncio event (safe to call is_set() from any thread)
+            if self._cancel_event.is_set():
+                self._cancel_threading_event.set()
+
     @property
     def layer3(self) -> "ManimPromptGenerator":
         if self._layer3 is None:
@@ -138,6 +171,7 @@ Do NOT use this tool when:
             # Lazy import to avoid 7+ second import cascade at module load time
             from layer4.generator import Layer4Generator
             self._layer4 = Layer4Generator(
+                api_provider="anthropic",  # Uses claude-opus-4-5-20251101 by default
                 manim_resolution=self.video_resolution,
                 output_dir=str(self.output_dir),
                 use_rag=True,
@@ -208,6 +242,12 @@ Do NOT use this tool when:
         Called from async context via executor.
         """
         try:
+            # Sync cancellation state from asyncio event
+            self._sync_cancel_state()
+            if self._is_cancelled():
+                print("🛑 Animation cancelled before starting")
+                return AnimationResult(success=False, error="Cancelled by user", cancelled=True)
+
             # Create minimal intent and section using the agent-provided animation description
             intent, section = self._create_minimal_intent(
                 concept, context, animation_description, focus_area
@@ -226,13 +266,29 @@ Do NOT use this tool when:
             print(f"  {animation_description}")
             print(f"{'='*60}")
 
+            # Check cancellation before Layer 3
+            self._sync_cancel_state()
+            if self._is_cancelled():
+                print("🛑 Animation cancelled before Layer 3")
+                return AnimationResult(success=False, error="Cancelled by user", cancelled=True)
+
             # Layer 3: Generate Manim prompt
             print("Step 1: Generating Manim prompt...")
             manim_prompt = self.layer3.generate_for_section(section, intent)
 
+            # Check cancellation before Layer 4 (the expensive part)
+            self._sync_cancel_state()
+            if self._is_cancelled():
+                print("🛑 Animation cancelled before Layer 4")
+                return AnimationResult(success=False, error="Cancelled by user", cancelled=True)
+
             # Layer 4: Generate code and render video
+            # Pass the threading event so Layer 4 can check and terminate subprocess
             print("Step 2: Generating code and rendering video...")
-            execution_result_with_metadata = self.layer4.generate(manim_prompt)
+            execution_result_with_metadata = self.layer4.generate(
+                manim_prompt,
+                cancel_event=self._cancel_threading_event
+            )
 
             if execution_result_with_metadata.execution_result.success:
                 # Generate a unique clip ID

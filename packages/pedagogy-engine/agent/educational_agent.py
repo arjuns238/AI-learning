@@ -12,7 +12,8 @@ They are loaded lazily when EducationalAgent is first instantiated.
 """
 
 import json
-from typing import AsyncIterator, Optional, List, Dict, Any
+import asyncio
+from typing import AsyncIterator, Optional, List, Dict, Any, TYPE_CHECKING
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -255,7 +256,8 @@ class EducationalAgent:
         message: str,
         conversation_history: List[Message],
         learner_context: Optional[LearnerContext] = None,
-        session: Optional[Session] = None
+        session: Optional[Session] = None,
+        cancel_event: Optional["asyncio.Event"] = None
     ) -> AsyncIterator[StreamEvent]:
         """
         Stream a response to the user's message.
@@ -265,7 +267,15 @@ class EducationalAgent:
         - ToolCall: When the agent decides to use a tool
         - ToolResult: When a tool completes
         - StreamDone: When streaming is complete
+
+        Args:
+            cancel_event: Optional asyncio.Event that when set, signals cancellation.
+                          This will stop streaming and terminate any running tools.
         """
+        # Pass cancel event to animation tool so it can be checked during video generation
+        if cancel_event is not None:
+            animation_tool = self._get_animation_tool()
+            animation_tool.set_cancel_event(cancel_event)
         # Lazy imports for LangChain message types
         from langchain.messages import AIMessageChunk
         from langchain_core.messages import HumanMessage, ToolMessage as LCToolMessage
@@ -319,6 +329,11 @@ class EducationalAgent:
                 config=config,
                 stream_mode=["messages", "updates"],
             ):
+                # Check for cancellation
+                if cancel_event is not None and cancel_event.is_set():
+                    print("🛑 Cancellation detected in agent streaming loop")
+                    return  # Exit the generator
+
                 if first_token_time is None:
                     first_token_time = time.time()
                     print(f"⏱️  TIMING: Time to first token: {first_token_time - stream_start_time:.3f}s", flush=True)

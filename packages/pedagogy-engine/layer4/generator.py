@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import time
 import ast
+import threading
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Tuple, List
@@ -669,11 +670,11 @@ class ManimCodeGenerator:
             self.model_name = model_name
         else:
             default_models = {
-                "anthropic": "claude-sonnet-4-5-20250929",
+                "anthropic": "claude-opus-4-5-20251101",
                 "openai": "gpt-5",
                 "deepseek": "deepseek-reasoner"
             }
-            self.model_name = default_models.get(api_provider, "claude-sonnet-4-5-20250929")
+            self.model_name = default_models.get(api_provider, "claude-opus-4-5-20251101")
 
         # Read temperature from env or use provided value or default to 0.0
         if temperature is not None:
@@ -1049,11 +1050,23 @@ class ManimExecutor:
         self,
         code: str,
         scene_name: str = "EducationalAnimation",
-        output_path: Optional[Path] = None
+        output_path: Optional[Path] = None,
+        cancel_event: Optional[threading.Event] = None
     ) -> VideoExecutionResult:
         print(f"\nExecuting Manim code for scene: {scene_name}")
 
         start_time = time.time()
+
+        # Check for cancellation before starting
+        if cancel_event and cancel_event.is_set():
+            print("🛑 Execution cancelled before starting")
+            return VideoExecutionResult(
+                success=False,
+                resolution=self.resolution,
+                execution_time_seconds=0.0,
+                error_message="Cancelled by user",
+                cancelled=True
+            )
 
         # Use deterministic file naming for caching, or temp files if caching disabled
         if self.enable_caching:
@@ -1103,17 +1116,53 @@ class ManimExecutor:
                 ]
 
             print(f"Running: {' '.join(cmd)}")
-            result = subprocess.run(
+
+            # Use Popen for cancellation support instead of run()
+            process = subprocess.Popen(
                 cmd,
                 cwd=str(self.output_dir),
-                capture_output=True,
-                text=True,
-                timeout=600
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
             )
+
+            # Poll for completion while checking for cancellation
+            stdout_data = ""
+            stderr_data = ""
+            cancelled = False
+
+            while process.poll() is None:
+                # Check for cancellation every 0.5 seconds
+                if cancel_event and cancel_event.is_set():
+                    print("🛑 Cancellation detected - terminating Manim subprocess")
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        print("🛑 Subprocess didn't terminate, killing...")
+                        process.kill()
+                        process.wait()
+                    cancelled = True
+                    break
+                time.sleep(0.5)
+
+            if cancelled:
+                execution_time = time.time() - start_time
+                return VideoExecutionResult(
+                    success=False,
+                    resolution=self.resolution,
+                    execution_time_seconds=execution_time,
+                    error_message="Cancelled by user",
+                    cancelled=True
+                )
+
+            # Get output after process completes
+            stdout_data, stderr_data = process.communicate()
+            result_returncode = process.returncode
 
             execution_time = time.time() - start_time
 
-            if result.returncode == 0:
+            if result_returncode == 0:
                 video_path = self._find_video_file(scene_name)
                 if video_path:
                     print(f"✓ Video generated successfully: {video_path}")
@@ -1126,7 +1175,7 @@ class ManimExecutor:
                         video_path=str(video_path),
                         resolution=self.resolution,
                         execution_time_seconds=execution_time,
-                        output_log=result.stdout
+                        output_log=stdout_data
                     )
                 else:
                     return VideoExecutionResult(
@@ -1134,7 +1183,7 @@ class ManimExecutor:
                         resolution=self.resolution,
                         execution_time_seconds=execution_time,
                         error_message="Video file not found after successful execution",
-                        output_log=result.stdout + "\n" + result.stderr
+                        output_log=stdout_data + "\n" + stderr_data
                     )
             else:
                 print(f"✗ Manim execution failed")
@@ -1142,8 +1191,8 @@ class ManimExecutor:
                     success=False,
                     resolution=self.resolution,
                     execution_time_seconds=execution_time,
-                    error_message=f"Manim execution failed with code {result.returncode}",
-                    output_log=result.stdout + "\n" + result.stderr
+                    error_message=f"Manim execution failed with code {result_returncode}",
+                    output_log=stdout_data + "\n" + stderr_data
                 )
 
         finally:
@@ -1299,18 +1348,49 @@ class Layer4Generator:
         self,
         manim_prompt: ManimPromptWithMetadata,
         scene_name: str = "EducationalAnimation",
-        output_file: Optional[Path] = None
+        output_file: Optional[Path] = None,
+        cancel_event: Optional[threading.Event] = None
         ) -> ManimExecutionWithMetadata:
 
         print("\n" + "="*60)
         print("Layer 4: Manim Code Generation & Video Execution")
         print("="*60)
 
+        # Check for cancellation at the start
+        if cancel_event and cancel_event.is_set():
+            print("🛑 Layer 4 cancelled before starting")
+            return ManimExecutionWithMetadata(
+                code_response=None,
+                execution_result=VideoExecutionResult(
+                    success=False,
+                    resolution=self.executor.resolution,
+                    execution_time_seconds=0.0,
+                    error_message="Cancelled by user",
+                    cancelled=True
+                ),
+                metadata={}
+            )
+
         max_attempts = 3
         code_response = None
         execution_result = None
 
         for attempt in range(1, max_attempts + 1):
+            # Check for cancellation between attempts
+            if cancel_event and cancel_event.is_set():
+                print("🛑 Layer 4 cancelled between attempts")
+                return ManimExecutionWithMetadata(
+                    code_response=code_response,
+                    execution_result=VideoExecutionResult(
+                        success=False,
+                        resolution=self.executor.resolution,
+                        execution_time_seconds=0.0,
+                        error_message="Cancelled by user",
+                        cancelled=True
+                    ),
+                    metadata={}
+                )
+
             print(f"\nAttempt {attempt}/{max_attempts}")
 
             # Step 1: Generate code from Layer 3 prompt
@@ -1341,8 +1421,21 @@ REMEMBER:
 """
                 continue  # retry generation
 
-            # Step 3: Execute the code
-            execution_result = self.executor.execute(code_response.code, scene_name)
+            # Step 3: Execute the code (with cancellation support)
+            execution_result = self.executor.execute(
+                code_response.code,
+                scene_name,
+                cancel_event=cancel_event
+            )
+
+            # Check if cancelled during execution
+            if execution_result.cancelled:
+                print("🛑 Execution cancelled")
+                return ManimExecutionWithMetadata(
+                    code_response=code_response,
+                    execution_result=execution_result,
+                    metadata={}
+                )
 
             if execution_result.success:
                 print("✓ Code executed successfully")

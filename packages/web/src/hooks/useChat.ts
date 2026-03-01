@@ -62,12 +62,17 @@ interface DoneEvent {
   session_id: string;
 }
 
+interface CancelledEvent {
+  type: "cancelled";
+  session_id: string;
+}
+
 interface ErrorEvent {
   type: "error";
   message: string;
 }
 
-type SSEEvent = TextEvent | ToolStartEvent | ToolResultEvent | DoneEvent | ErrorEvent;
+type SSEEvent = TextEvent | ToolStartEvent | ToolResultEvent | DoneEvent | CancelledEvent | ErrorEvent;
 
 // ============ Hook ============
 
@@ -288,6 +293,21 @@ export function useChat() {
         }));
         break;
 
+      case "cancelled":
+        // Stream cancelled by user
+        setState((prev) => ({
+          ...prev,
+          isStreaming: false,
+          sessionId: event.session_id,
+          pendingAnimations: [], // Clear pending animations
+          messages: prev.messages.map((msg) =>
+            msg.id === messageId
+              ? { ...msg, isStreaming: false }
+              : msg
+          ),
+        }));
+        break;
+
       case "error":
         setState((prev) => ({
           ...prev,
@@ -316,16 +336,31 @@ export function useChat() {
   }, [cleanup]);
 
   // Cancel current stream
-  const cancel = useCallback(() => {
+  const cancel = useCallback(async () => {
+    // Call backend cancel endpoint to stop video generation
+    if (state.sessionId) {
+      try {
+        await fetch(`${API_BASE}/api/chat/cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: state.sessionId }),
+        });
+      } catch (e) {
+        // Ignore errors - best effort cancellation
+        console.warn("Failed to call cancel endpoint:", e);
+      }
+    }
+
     cleanup();
     setState((prev) => ({
       ...prev,
       isStreaming: false,
+      pendingAnimations: [], // Clear pending animations on cancel
       messages: prev.messages.map((msg) =>
         msg.isStreaming ? { ...msg, isStreaming: false } : msg
       ),
     }));
-  }, [cleanup]);
+  }, [cleanup, state.sessionId]);
 
   return {
     ...state,
