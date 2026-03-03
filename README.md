@@ -111,10 +111,3 @@ Next.js web application with interactive visualizations.
 Shared TypeScript type definitions that mirror Python Pydantic schemas.
 - `pedagogical-intent.ts` - Matches layer1/schema.py
 - `lesson.ts` - Web app lesson format
-
-## Documentation
-
-- [CLAUDE.md](packages/pedagogy-engine/CLAUDE.md) - Complete project documentation
-- [STATUS.md](packages/pedagogy-engine/STATUS.md) - Current status and next steps
-- [GETTING_STARTED.md](packages/pedagogy-engine/GETTING_STARTED.md) - Getting started guide
-- [MONOREPO_MIGRATION.md](MONOREPO_MIGRATION.md) - Migration history
