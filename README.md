@@ -61,12 +61,7 @@ cp packages/web/.env.example packages/web/.env.local
 ### Running the System
 
 ```bash
-# Run everything (web + API)
 npm run dev
-
-# Or run individually:
-npm run dev:web      # Next.js frontend only (http://localhost:3000)
-npm run dev:api      # FastAPI backend only (http://localhost:8000)
 ```
 
 Visit:
