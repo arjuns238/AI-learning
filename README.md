@@ -15,11 +15,12 @@ gradient descent.
 
 ## The problem with AI tutors
 
-Most AI tutors are LLM wrappers: you ask a question, 
-you get an explanation. The explanation quality depends 
+With most LLMs, you ask a question and 
+you get a text explanation. The explanation quality depends 
 entirely on what the LLM happens to generate. There's no 
 reasoning about the learner, no pedagogical strategy, no 
-structured progression from confusion to understanding.
+structured progression from confusion to understanding, and most
+importantly, no **visualizations**.
 
 ---
 
