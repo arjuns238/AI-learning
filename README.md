@@ -1,8 +1,8 @@
 # Lesson Loom
 
 An adaptive learning system that generates personalized 
-explanations of technical concepts — with animated 
-visualizations — by reasoning about *how* to teach, not 
+explanations of technical concepts **with animated 
+visualizations** by reasoning about *how* to teach, not 
 just what to say.
 
 ## Demo
