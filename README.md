@@ -6,8 +6,8 @@ visualizations — by reasoning about *how* to teach, not
 just what to say.
 
 ## Demo
+<video src="https://github.com/user-attachments/assets/6c3a35d5-39d3-4d61-8110-c16e7113cb47" controls width="100%"></video>
 
-[▶ Watch 90-second demo](link-to-your-video)
 
 Topics demonstrated: backpropagation, transformer attention, 
 gradient descent.
