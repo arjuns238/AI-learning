@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import time
 import ast
+import threading
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Tuple, List
@@ -64,11 +65,51 @@ def detect_scene_name(code: str) -> Optional[str]:
 
 # ---------- RAG Vector Store ----------
 
+import threading
+
+# Thread-safe singleton for embedder (expensive to load, should only be loaded once)
+_embedder_lock = threading.Lock()
+_shared_embedder = None
+
+def _get_shared_embedder():
+    """Get or create the shared SentenceTransformer embedder (thread-safe singleton)."""
+    global _shared_embedder
+    if _shared_embedder is None:
+        with _embedder_lock:
+            # Double-check after acquiring lock
+            if _shared_embedder is None:
+                if HAS_SENTENCE_TRANSFORMERS:
+                    _shared_embedder = SentenceTransformer("all-MiniLM-L6-v2")
+    return _shared_embedder
+
+
+# Thread-safe singleton for vector store (expensive to load - Chroma DB + embeddings)
+_vector_store_lock = threading.Lock()
+_shared_vector_store = None
+
+def _get_shared_vector_store():
+    """Get or create the shared ManimVectorStore instance (thread-safe singleton).
+
+    This avoids reloading the Chroma database and embeddings on every request,
+    saving 500-1500ms per animation generation.
+    """
+    global _shared_vector_store
+    if _shared_vector_store is None:
+        with _vector_store_lock:
+            # Double-check after acquiring lock
+            if _shared_vector_store is None:
+                print("🚀 Initializing shared vector store (one-time)...")
+                _shared_vector_store = ManimVectorStore()
+    return _shared_vector_store
+
+
 class ManimVectorStore:
     """
     Vector store for Manim datasets using Chroma.
     Supports multiple datasets: ManimBench-v1, 3blue1brown-manim, and more.
     Stores embeddings persistently in the project data directory.
+
+    Uses a thread-safe singleton for the embedder to avoid parallel loading issues.
     """
 
     # Store vector database in project data directory
@@ -124,8 +165,8 @@ class ManimVectorStore:
                 metadata={"hnsw:space": "cosine"}
             )
 
-            # Initialize embedder
-            self.embedder = SentenceTransformer("all-MiniLM-L6-v2")
+            # Use shared embedder (thread-safe singleton)
+            self.embedder = _get_shared_embedder()
 
             self._initialized = True
             count = self.collection.count()
@@ -541,11 +582,15 @@ class ManimVectorStore:
 class ManimBenchRetriever:
     """
     Retrieves relevant examples from ManimBench-v1 using vector store.
+
+    Uses a shared vector store singleton to avoid reloading the Chroma database
+    and embeddings on each instantiation.
     """
 
     def __init__(self):
-        self.vector_store = ManimVectorStore()
-        self._initialized = self.vector_store._initialized
+        # Use shared vector store singleton instead of creating new instance
+        self.vector_store = _get_shared_vector_store()
+        self._initialized = self.vector_store._initialized if self.vector_store else False
 
     def retrieve(self, query: str, top_k: int = 3) -> List[dict]:
         """Delegate to vector store."""
@@ -625,11 +670,11 @@ class ManimCodeGenerator:
             self.model_name = model_name
         else:
             default_models = {
-                "anthropic": "claude-sonnet-4-5-20250929",
+                "anthropic": "claude-opus-4-5-20251101",
                 "openai": "gpt-5",
                 "deepseek": "deepseek-reasoner"
             }
-            self.model_name = default_models.get(api_provider, "claude-sonnet-4-5-20250929")
+            self.model_name = default_models.get(api_provider, "claude-opus-4-5-20251101")
 
         # Read temperature from env or use provided value or default to 0.0
         if temperature is not None:
@@ -955,18 +1000,31 @@ VISUAL QUALITY:
 class ManimExecutor:
     """
     Executes generated Manim code and produces video output.
+
+    Supports:
+    - OpenGL renderer for GPU acceleration (faster on M1/M2 Macs and discrete GPUs)
+    - Deterministic file naming for Manim's built-in caching
     """
 
     def __init__(
         self,
         resolution: str = "1080p60",
         quality: str = "high_quality",
-        output_dir: str = "output/videos"
+        output_dir: str = "output/videos",
+        use_opengl: bool = False,  # OpenGL has issues with parallel rendering; Cairo is faster and more reliable
+        enable_caching: bool = True
     ):
         self.resolution = resolution
         self.quality = quality
         self.output_dir = Path(output_dir)
+        self.use_opengl = use_opengl
+        self.enable_caching = enable_caching
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create a dedicated directory for cached scene files
+        self.cache_dir = self.output_dir / "scene_cache"
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
         self._check_manim_installed()
 
     def _check_manim_installed(self):
@@ -983,47 +1041,128 @@ class ManimExecutor:
         except FileNotFoundError:
             raise RuntimeError("Manim not found. Install with: pip install manim")
 
+    def _get_code_hash(self, code: str) -> str:
+        """Generate a short hash of the code for caching purposes."""
+        import hashlib
+        return hashlib.md5(code.encode()).hexdigest()[:12]
+
     def execute(
         self,
         code: str,
         scene_name: str = "EducationalAnimation",
-        output_path: Optional[Path] = None
+        output_path: Optional[Path] = None,
+        cancel_event: Optional[threading.Event] = None
     ) -> VideoExecutionResult:
         print(f"\nExecuting Manim code for scene: {scene_name}")
 
         start_time = time.time()
-        with tempfile.NamedTemporaryFile(
-            mode='w',
-            suffix='.py',
-            delete=False,
-            dir=str(self.output_dir)
-        ) as f:
-            f.write(code)
-            temp_file = f.name
+
+        # Check for cancellation before starting
+        if cancel_event and cancel_event.is_set():
+            print("🛑 Execution cancelled before starting")
+            return VideoExecutionResult(
+                success=False,
+                resolution=self.resolution,
+                execution_time_seconds=0.0,
+                error_message="Cancelled by user",
+                cancelled=True
+            )
+
+        # Use deterministic file naming for caching, or temp files if caching disabled
+        if self.enable_caching:
+            code_hash = self._get_code_hash(code)
+            scene_file = self.cache_dir / f"scene_{code_hash}.py"
+            scene_file.write_text(code)
+            # Use absolute path to avoid cwd confusion
+            temp_file = str(scene_file.absolute())
+            delete_after = False
+            print(f"  Cache key: {code_hash}")
+        else:
+            with tempfile.NamedTemporaryFile(
+                mode='w',
+                suffix='.py',
+                delete=False,
+                dir=str(self.output_dir)
+            ) as f:
+                f.write(code)
+                # Use absolute path
+                temp_file = str(Path(f.name).absolute())
+            delete_after = True
 
         try:
-            resolution_flag = self._parse_resolution(self.resolution)
-            # Only pass resolution flag; Manim uses it for quality internally
-            cmd = [
-                "manim",
-                resolution_flag,
-                temp_file,
-                scene_name,
-                "-o", scene_name
-            ]
+            # Build command with appropriate flags
+            if self.use_opengl:
+                # OpenGL: no preview flag, use --write_to_movie
+                quality_flags = self._get_quality_flags(self.resolution, include_preview=False)
+                cmd = [
+                    "manim",
+                    "--renderer=opengl",
+                    "--write_to_movie",
+                    *quality_flags,
+                    temp_file,
+                    scene_name,
+                    "-o", scene_name
+                ]
+                print(f"  Using OpenGL renderer (GPU accelerated)")
+            else:
+                # Cairo: use legacy flags with preview
+                resolution_flag = self._parse_resolution(self.resolution)
+                cmd = [
+                    "manim",
+                    resolution_flag,
+                    temp_file,
+                    scene_name,
+                    "-o", scene_name
+                ]
 
             print(f"Running: {' '.join(cmd)}")
-            result = subprocess.run(
+
+            # Use Popen for cancellation support instead of run()
+            process = subprocess.Popen(
                 cmd,
                 cwd=str(self.output_dir),
-                capture_output=True,
-                text=True,
-                timeout=600
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
             )
+
+            # Poll for completion while checking for cancellation
+            stdout_data = ""
+            stderr_data = ""
+            cancelled = False
+
+            while process.poll() is None:
+                # Check for cancellation every 0.5 seconds
+                if cancel_event and cancel_event.is_set():
+                    print("🛑 Cancellation detected - terminating Manim subprocess")
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        print("🛑 Subprocess didn't terminate, killing...")
+                        process.kill()
+                        process.wait()
+                    cancelled = True
+                    break
+                time.sleep(0.5)
+
+            if cancelled:
+                execution_time = time.time() - start_time
+                return VideoExecutionResult(
+                    success=False,
+                    resolution=self.resolution,
+                    execution_time_seconds=execution_time,
+                    error_message="Cancelled by user",
+                    cancelled=True
+                )
+
+            # Get output after process completes
+            stdout_data, stderr_data = process.communicate()
+            result_returncode = process.returncode
 
             execution_time = time.time() - start_time
 
-            if result.returncode == 0:
+            if result_returncode == 0:
                 video_path = self._find_video_file(scene_name)
                 if video_path:
                     print(f"✓ Video generated successfully: {video_path}")
@@ -1036,7 +1175,7 @@ class ManimExecutor:
                         video_path=str(video_path),
                         resolution=self.resolution,
                         execution_time_seconds=execution_time,
-                        output_log=result.stdout
+                        output_log=stdout_data
                     )
                 else:
                     return VideoExecutionResult(
@@ -1044,7 +1183,7 @@ class ManimExecutor:
                         resolution=self.resolution,
                         execution_time_seconds=execution_time,
                         error_message="Video file not found after successful execution",
-                        output_log=result.stdout + "\n" + result.stderr
+                        output_log=stdout_data + "\n" + stderr_data
                     )
             else:
                 print(f"✗ Manim execution failed")
@@ -1052,15 +1191,51 @@ class ManimExecutor:
                     success=False,
                     resolution=self.resolution,
                     execution_time_seconds=execution_time,
-                    error_message=f"Manim execution failed with code {result.returncode}",
-                    output_log=result.stdout + "\n" + result.stderr
+                    error_message=f"Manim execution failed with code {result_returncode}",
+                    output_log=stdout_data + "\n" + stderr_data
                 )
 
         finally:
-            if Path(temp_file).exists():
+            # Only delete temp files if caching is disabled
+            if delete_after and Path(temp_file).exists():
                 Path(temp_file).unlink()
 
+    def _get_quality_flags(self, resolution: str, include_preview: bool = True) -> List[str]:
+        """
+        Get Manim quality flags for the given resolution.
+
+        Args:
+            resolution: Target resolution (e.g., '480p15', '1080p60')
+            include_preview: Whether to include -p flag (disable for OpenGL/subprocess)
+
+        Returns:
+            List of flags to pass to manim command
+        """
+        # Quality settings: maps resolution to (quality_flag, frame_rate)
+        quality_map = {
+            "1080p60": ("h", 60),   # high quality
+            "1080p30": ("h", 30),
+            "720p60": ("m", 60),    # medium quality
+            "720p30": ("m", 30),
+            "480p30": ("l", 30),    # low quality
+            "480p15": ("l", 15)
+        }
+
+        quality, fps = quality_map.get(resolution, ("h", 60))
+
+        flags = [f"-q{quality}"]
+
+        # Add frame rate flag
+        flags.append(f"--frame_rate={fps}")
+
+        # Add preview flag only if requested (not for OpenGL in subprocess)
+        if include_preview:
+            flags.insert(0, "-p")
+
+        return flags
+
     def _parse_resolution(self, resolution: str) -> str:
+        """Legacy method for backward compatibility."""
         mapping = {
             "1080p60": "-pqh",
             "1080p30": "-ph",
@@ -1135,6 +1310,10 @@ class Layer4Generator:
     """
     Orchestrates: Prompt → Code → Validation → Execution
     Supports RAG (Retrieval-Augmented Generation) with ManimBench-v1 dataset.
+
+    Performance options:
+    - use_opengl: Enable GPU-accelerated rendering (faster on M1/M2 Macs)
+    - enable_caching: Use deterministic file names for Manim's built-in caching
     """
 
     def __init__(
@@ -1146,7 +1325,9 @@ class Layer4Generator:
         manim_quality: str = "high_quality",
         output_dir: str = "output/videos",
         use_rag: bool = True,
-        rag_examples: int = 3
+        rag_examples: int = 3,
+        use_opengl: bool = False,  # OpenGL has issues with parallel rendering; Cairo is faster and more reliable
+        enable_caching: bool = True
     ):
         self.code_generator = ManimCodeGenerator(
             api_provider=api_provider,
@@ -1158,25 +1339,58 @@ class Layer4Generator:
         self.executor = ManimExecutor(
             resolution=manim_resolution,
             quality=manim_quality,
-            output_dir=output_dir
+            output_dir=output_dir,
+            use_opengl=use_opengl,
+            enable_caching=enable_caching
         )
 
     def generate(
         self,
         manim_prompt: ManimPromptWithMetadata,
         scene_name: str = "EducationalAnimation",
-        output_file: Optional[Path] = None
+        output_file: Optional[Path] = None,
+        cancel_event: Optional[threading.Event] = None
         ) -> ManimExecutionWithMetadata:
 
         print("\n" + "="*60)
         print("Layer 4: Manim Code Generation & Video Execution")
         print("="*60)
 
+        # Check for cancellation at the start
+        if cancel_event and cancel_event.is_set():
+            print("🛑 Layer 4 cancelled before starting")
+            return ManimExecutionWithMetadata(
+                code_response=None,
+                execution_result=VideoExecutionResult(
+                    success=False,
+                    resolution=self.executor.resolution,
+                    execution_time_seconds=0.0,
+                    error_message="Cancelled by user",
+                    cancelled=True
+                ),
+                metadata={}
+            )
+
         max_attempts = 3
         code_response = None
         execution_result = None
 
         for attempt in range(1, max_attempts + 1):
+            # Check for cancellation between attempts
+            if cancel_event and cancel_event.is_set():
+                print("🛑 Layer 4 cancelled between attempts")
+                return ManimExecutionWithMetadata(
+                    code_response=code_response,
+                    execution_result=VideoExecutionResult(
+                        success=False,
+                        resolution=self.executor.resolution,
+                        execution_time_seconds=0.0,
+                        error_message="Cancelled by user",
+                        cancelled=True
+                    ),
+                    metadata={}
+                )
+
             print(f"\nAttempt {attempt}/{max_attempts}")
 
             # Step 1: Generate code from Layer 3 prompt
@@ -1207,8 +1421,21 @@ REMEMBER:
 """
                 continue  # retry generation
 
-            # Step 3: Execute the code
-            execution_result = self.executor.execute(code_response.code, scene_name)
+            # Step 3: Execute the code (with cancellation support)
+            execution_result = self.executor.execute(
+                code_response.code,
+                scene_name,
+                cancel_event=cancel_event
+            )
+
+            # Check if cancelled during execution
+            if execution_result.cancelled:
+                print("🛑 Execution cancelled")
+                return ManimExecutionWithMetadata(
+                    code_response=code_response,
+                    execution_result=execution_result,
+                    metadata={}
+                )
 
             if execution_result.success:
                 print("✓ Code executed successfully")

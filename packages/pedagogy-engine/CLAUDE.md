@@ -8,7 +8,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Core Philosophy:** Separate pedagogical reasoning (how people learn) from visualization/rendering (how content is displayed). This decomposition ensures learning quality is not entangled with animation or UI concerns.
 
-## Architecture: Four-Layer Design
+## NEW: Agentic Architecture (January 2026)
+
+The platform now uses an **agent-with-tools** architecture. See [/.claude/agent-architecture.md](/.claude/agent-architecture.md) for full details.
+
+**Key changes:**
+- **Layer 0 (Educational Agent)**: A conversational LLM that IS the learning experience
+- **Video as a tool**: Animation generation is now a tool the agent can invoke when pedagogically useful
+- **Streaming responses**: Text streams token-by-token like ChatGPT
+- **Session memory**: Conversation context is preserved across messages
+- **Adaptive**: Agent decides when visuals help, doesn't always generate them
+
+**New files:**
+- `agent/` - The educational agent framework
+- `agent/tools/animation_tool.py` - Wraps Layer 3+4 as a tool
+- `/api/routes/chat.py` - Streaming SSE endpoint
+- `/web/src/app/chat/page.tsx` - New chat interface at `/chat`
+
+The old pipeline architecture (Layers 1-4) still exists and is used internally by the animation tool.
+
+---
+
+## Legacy Architecture: Four-Layer Design
 
 ### Layer 1: Topic → Pedagogical Intent (LEARNED/PROMPTED)
 - **Purpose:** Decide what understanding should change in the learner
@@ -318,3 +339,5 @@ The only advantage of end-to-end (theoretical joint optimization) is impractical
 - Full modeling strategy: See approved plan in `.claude/plans/cryptic-painting-seahorse.md`
 - Pedagogical research: Concept inventories, learning progressions literature
 - Public datasets: Khan Academy, OpenStax, ASSISTments (use for pattern extraction, not copying)
+- Always use Context7 MCP when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
+- Implement basic authentication with Supabase. use library /supabase/supabase for API and docs.

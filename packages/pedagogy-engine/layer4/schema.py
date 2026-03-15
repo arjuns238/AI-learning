@@ -68,6 +68,11 @@ class VideoExecutionResult(BaseModel):
         description="Stdout/stderr from Manim execution"
     )
 
+    cancelled: bool = Field(
+        default=False,
+        description="Whether the execution was cancelled by the user"
+    )
+
 
 class ManimExecutionWithMetadata(BaseModel):
     """
@@ -93,3 +98,101 @@ class Layer4ExecutionMetadata(BaseModel):
     execution_timestamp: str
     api_provider: str = "openai"
     model_used: str
+
+
+# ============================================
+# Animation Clip Types (Phase 2)
+# ============================================
+
+class AnimationClip(BaseModel):
+    """
+    A short, focused animation clip for a specific concept.
+
+    Generated from a VisualOpportunity identified by the Visual Planner.
+    """
+
+    clip_id: str = Field(
+        ...,
+        description="Unique identifier for this clip (matches opportunity.id)"
+    )
+
+    opportunity_id: str = Field(
+        ...,
+        description="ID of the VisualOpportunity this clip was generated from"
+    )
+
+    concept: str = Field(
+        ...,
+        description="The concept being visualized"
+    )
+
+    placement: str = Field(
+        ...,
+        description="Where in the UI this clip should appear: core_mechanism, misconception, example, contrast"
+    )
+
+    video_path: Optional[str] = Field(
+        default=None,
+        description="Local path to the generated video file"
+    )
+
+    video_url: Optional[str] = Field(
+        default=None,
+        description="URL to access the video (if uploaded)"
+    )
+
+    duration_seconds: float = Field(
+        default=0.0,
+        description="Actual duration of the generated clip"
+    )
+
+    success: bool = Field(
+        default=False,
+        description="Whether the clip was successfully generated"
+    )
+
+    error_message: Optional[str] = Field(
+        default=None,
+        description="Error message if generation failed"
+    )
+
+    execution_time_seconds: float = Field(
+        default=0.0,
+        description="Time taken to generate this clip"
+    )
+
+    generated_code: Optional[str] = Field(
+        default=None,
+        description="The Manim code that was generated (for debugging)"
+    )
+
+
+class ClipGenerationResult(BaseModel):
+    """
+    Result of generating multiple clips for a lesson.
+    """
+
+    topic: str = Field(
+        ...,
+        description="The topic these clips are for"
+    )
+
+    clips: list[AnimationClip] = Field(
+        default_factory=list,
+        description="List of generated clips (0-2 typically)"
+    )
+
+    total_generation_time_seconds: float = Field(
+        default=0.0,
+        description="Total time to generate all clips"
+    )
+
+    clips_requested: int = Field(
+        default=0,
+        description="Number of clips that were requested"
+    )
+
+    clips_succeeded: int = Field(
+        default=0,
+        description="Number of clips that generated successfully"
+    )

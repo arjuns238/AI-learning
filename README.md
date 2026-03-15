@@ -1,4 +1,4 @@
-# AI Learning Platform
+# Lesson Loom
 
 An adaptive learning system that generates personalized 
 explanations of technical concepts — with animated 
