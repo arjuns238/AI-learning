@@ -1,113 +1,95 @@
 # AI Learning Platform
 
-An AI-powered learning system that separates pedagogical reasoning from visualization to create effective educational content for complex technical topics.
+An adaptive learning system that generates personalized 
+explanations of technical concepts — with animated 
+visualizations — by reasoning about *how* to teach, not 
+just what to say.
+
+## Demo
+
+[▶ Watch 90-second demo](link-to-your-video)
+
+Topics demonstrated: backpropagation, transformer attention, 
+gradient descent.
+
+## The problem with AI tutors
+
+Most AI tutors are LLM wrappers: you ask a question, 
+you get an explanation. The explanation quality depends 
+entirely on what the LLM happens to generate. There's no 
+reasoning about the learner, no pedagogical strategy, no 
+structured progression from confusion to understanding.
+
+## The approach
+
+Separate pedagogical reasoning from content generation 
+through a four-layer pipeline:
+
+**Layer 1 — Topic → Pedagogical Intent**  
+Given a topic and what the learner already knows, decide 
+*what understanding should change* and *why*. This is the 
+reasoning layer — it determines learning objectives, 
+identifies common misconceptions, and selects an 
+explanatory strategy before any content is generated.
+
+**Layer 2 — Pedagogical Intent → Storyboard**  
+Sequence the explanation: what concept comes first, what 
+analogy sets up the harder idea, where does the learner 
+need to verify understanding before moving on.
+
+**Layer 3 — Storyboard → Scene Spec DSL**  
+Compile the storyboard into a structured visual spec — 
+a domain-specific language that describes animations in 
+terms of learning primitives (reveal, contrast, 
+transform, emphasize) rather than rendering primitives.
+
+**Layer 4 — Scene Spec → Manim Animation**  
+Render the scene spec into actual animations using Manim. 
+This layer knows nothing about pedagogy — it just renders 
+what it's given.
+
+The key insight: by the time we reach Layer 4, all 
+pedagogical decisions have already been made. The 
+renderer is a pure function of the spec.
 
 ## Architecture
-
-This monorepo contains four packages working together:
-
 ```
 ai-learning/
 ├── packages/
-│   ├── pedagogy-engine/    # Python - AI pedagogy generation (Layer 1-3)
-│   ├── api/                # FastAPI - Backend bridge
-│   ├── web/                # Next.js - Frontend UI
-│   └── shared/             # TypeScript types (shared across packages)
-└── MONOREPO_MIGRATION.md   # Migration history and details
+│   ├── pedagogy-engine/   # Python — layers 1-3
+│   ├── api/               # FastAPI — bridge layer
+│   ├── web/               # Next.js — UI + lesson rendering
+│   └── shared/            # TypeScript types mirroring 
+│                          # Python Pydantic schemas
 ```
 
-## Core Philosophy
+Full-stack monorepo. The web frontend is deployable 
+independently of the Manim renderer — UI runs on Vercel, 
+animation generation requires local setup (Manim has 
+system-level dependencies that make serverless hosting 
+expensive).
 
-Separate pedagogical reasoning (how people learn) from visualization (how content is displayed). This decomposition ensures learning quality is not entangled with animation or UI concerns.
+## Why this architecture
 
-### Four-Layer Design
+The naive approach entangles pedagogy with visualization: 
+prompt the LLM to "explain X with visuals." This means 
+explanation quality and animation quality fail together 
+and improve together, making it impossible to iterate 
+on either independently.
 
-1. **Layer 1: Topic → Pedagogical Intent** - Decide what understanding should change in the learner
-2. **Layer 2: Pedagogical Intent → Storyboard** - Sequence the explanation
-3. **Layer 3: Storyboard → Scene Spec DSL** - Compile into visual primitives
-4. **Layer 4: Scene Spec → Renderable Output** - Convert to Manim animations
+Separating them means:
+- Pedagogy engine can be evaluated and improved without 
+  touching the renderer
+- Different renderers (Manim, Mermaid, plain text) can 
+  consume the same scene spec
+- The DSL acts as a stable interface between reasoning 
+  and rendering
 
-## Quick Start
+## Stack
 
-### Prerequisites
-- Node.js 18+
-- Python 3.9+
-- npm 9+
+Python · FastAPI · Next.js · TypeScript · Manim · 
+OpenAI/Claude API · Pydantic · Tailwind CSS
 
-### Installation
+## Running locally
 
-```bash
-# Install Node dependencies
-npm install
-
-# Set up Python environment for pedagogy engine
-cd packages/pedagogy-engine
-python -m venv venv
-source venv/bin/activate  # On macOS/Linux
-pip install -r requirements.txt
-cd ../..
-
-# Set up Python environment for API
-cd packages/api
-pip install -r requirements.txt
-cd ../..
-
-# Configure OpenAI API keys
-cp packages/pedagogy-engine/.env.example packages/pedagogy-engine/.env
-cp packages/web/.env.example packages/web/.env.local
-# Edit both .env files and add your OPENAI_API_KEY
-```
-
-### Running the System
-
-```bash
-npm run dev
-```
-
-Visit:
-- **Web App**: http://localhost:3000
-- **API**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs
-
-### Generate Pedagogical Intent (CLI)
-
-```bash
-cd packages/pedagogy-engine
-source venv/bin/activate
-python -m layer1.generator --topic "Backpropagation in Neural Networks"
-```
-
-## Package Overview
-
-### packages/pedagogy-engine
-The core AI system for generating pedagogical content. Contains:
-- **layer1/** - Pedagogical intent generation (OpenAI/Claude integration)
-- **layer2/** - Storyboard generation (planned)
-- **layer3/** - Scene spec DSL (planned)
-- **data/exemplars.json** - Few-shot learning exemplars
-- **prompts/** - Prompt templates
-- **output/** - Generated pedagogical intents
-
-See [packages/pedagogy-engine/CLAUDE.md](packages/pedagogy-engine/CLAUDE.md) for detailed documentation.
-
-### packages/api
-FastAPI backend that bridges the Python pedagogy engine with the TypeScript web frontend.
-
-**Endpoints:**
-- `POST /api/generate` - Generate pedagogical intent from topic
-- `POST /api/generate/batch` - Batch generation
-- `POST /api/lessons/from-intent` - Convert PedagogicalIntent → Lesson format
-
-### packages/web
-Next.js web application with interactive visualizations.
-
-**Features:**
-- Lesson rendering with multiple visual types (plots, diagrams, attention heatmaps)
-- Interactive quizzes
-- Mermaid diagram support
-- Responsive UI with Tailwind CSS
-
-### packages/shared
-Shared TypeScript type definitions that mirror Python Pydantic schemas.
-- `pedagogical-intent.ts` - Matches layer1/schema.py
-- `lesson.ts` - Web app lesson format
+[existing setup instructions — keep these]
